@@ -18,12 +18,18 @@ The pipeline consists of 5 specialized agents:
 
 Run the automated setup script:
 
+**Linux/Mac:**
 ```bash
 ./setup.sh
 ```
 
-This script will:
-- Create a Python virtual environment in `./venv`
+**Windows:**
+```cmd
+setup.bat
+```
+
+These scripts will:
+- Create a Python virtual environment in `./venv` (or `.\venv` on Windows)
 - Generate the `pyvenv.cfg` file
 - Install all required dependencies from `requirements.txt`
 
