@@ -1,0 +1,8 @@
+spleeter
+openai-whisper
+openai
+librosa
+fastdtw
+pydub
+numpy
+scipy
