@@ -18,6 +18,31 @@ The pipeline consists of 5 specialized agents:
 pip install -r requirements.txt
 ```
 
+## Setup
+
+### API Key Configuration
+
+The pipeline requires a Google Gemini API key for lyric generation (Stage 2).
+
+1. Create a `.env` file in the project root (if it doesn't exist)
+2. Add your Gemini API key:
+   ```
+   GEMINI_API_KEY=your-actual-api-key-here
+   ```
+
+### Testing Your API Key
+
+To verify that your API key is properly configured, run the test script:
+
+```bash
+python test_api_key.py
+```
+
+This will:
+- Check if the `.env` file is loaded correctly
+- Verify that the API key is set
+- Test connectivity to the Gemini API (if a valid key is provided)
+
 ## Usage
 
 ```bash
@@ -49,6 +74,7 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
   - fastdtw (for future alignment)
   - pydub (audio mixing)
   - numpy, scipy (numerical processing)
+  - python-dotenv (environment variable loading)
 
 ## Pipeline Stages
 

@@ -7,7 +7,10 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv  # <--- ADD THIS IMPORT
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class PreProcessAgent:
@@ -114,8 +117,14 @@ class LyricGenerationAgent:
         # then falls back to the environment variable.
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY')
         if not self.api_key:
-            print("  ⚠ Warning: No Gemini API key found. Set GEMINI_API_KEY environment variable.")
-
+            print("  ⚠ Warning: No Gemini API key found.")
+            print("     → Set GEMINI_API_KEY in your .env file")
+            print("     → Run 'python test_api_key.py' to verify your setup")
+        elif self.api_key == "put-key-here":
+            print("  ⚠ Warning: GEMINI_API_KEY is set to placeholder value.")
+            print("     → Update your .env file with a real API key")
+            print("     → Run 'python test_api_key.py' to verify your setup")
+    
     def rewrite_lyrics(self, original_lyrics, theme):
         """
         Rewrite lyrics to match the given theme using Google Gemini
