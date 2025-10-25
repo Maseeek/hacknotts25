@@ -88,6 +88,23 @@ response = requests.post(f"{service_url}/separate", json={...})
 ✅ **Easy Development**: Convenience scripts simplify workflow
 ✅ **Future-Proof**: Easy to add more services or update Python versions
 
+## Trade-offs
+
+### Performance Considerations
+- **Network Overhead**: HTTP calls add ~10-50ms latency vs direct function calls
+- **Serialization**: Audio file paths transmitted as JSON (minimal overhead)
+- **Benefit**: Allows parallel processing and load balancing in production
+
+### Security Implications
+- **Attack Surface**: Service exposes HTTP endpoint (localhost only by default)
+- **Mitigation**: Service binds to localhost, can add authentication for production
+- **Best Practice**: Deploy behind reverse proxy (nginx/traefik) in production
+
+### Operational Complexity
+- **Setup**: Requires managing two Python environments
+- **Monitoring**: Two processes to monitor instead of one
+- **Benefit**: Isolated failures - Spleeter crash doesn't affect main pipeline
+
 ## Usage
 
 ### Quick Start
@@ -159,12 +176,22 @@ All code has been validated for:
 
 ## Future Enhancements
 
-Possible improvements:
-- Add Docker containers for even easier deployment
-- Implement service discovery for multiple Spleeter instances
-- Add authentication/API keys for production use
-- Implement request queuing for concurrent processing
-- Add monitoring and metrics collection
+Possible improvements prioritized by impact:
+
+### High Priority (Essential for Production)
+- **Add authentication/API keys**: Secure the service endpoint (Effort: 4 hours)
+- **Add monitoring and metrics collection**: Track service health and performance (Effort: 8 hours)
+- **Implement request queuing**: Handle concurrent requests gracefully (Effort: 6 hours)
+
+### Medium Priority (Deployment & Scaling)
+- **Add Docker containers**: Simplify deployment across environments (Effort: 4 hours)
+- **Implement service discovery**: Support multiple Spleeter instances (Effort: 12 hours)
+- **Add health check probes**: Kubernetes/cloud-native readiness (Effort: 2 hours)
+
+### Low Priority (Nice to Have)
+- **WebSocket support**: Real-time progress updates for long operations (Effort: 8 hours)
+- **Caching layer**: Store results for identical requests (Effort: 6 hours)
+- **Admin dashboard**: Web UI for service management (Effort: 16 hours)
 
 ## Summary
 
