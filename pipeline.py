@@ -151,6 +151,10 @@ Provide only the rewritten lyrics, no explanations."""
 
             response = model.generate_content(prompt)
             
+            # Validate response contains text
+            if not response or not hasattr(response, 'text') or not response.text:
+                raise ValueError("Gemini API returned empty or invalid response")
+            
             new_lyrics = response.text.strip()
             
             print(f"  ✓ Generated new lyrics ({len(new_lyrics)} characters)")
