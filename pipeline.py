@@ -116,7 +116,13 @@ class LyricGenerationAgent:
     def __init__(self, api_key=None):
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY')
         if not self.api_key:
-            print("  ⚠ Warning: No Gemini API key found. Set GEMINI_API_KEY environment variable.")
+            print("  ⚠ Warning: No Gemini API key found.")
+            print("     → Set GEMINI_API_KEY in your .env file")
+            print("     → Run 'python test_api_key.py' to verify your setup")
+        elif self.api_key == "put-key-here":
+            print("  ⚠ Warning: GEMINI_API_KEY is set to placeholder value.")
+            print("     → Update your .env file with a real API key")
+            print("     → Run 'python test_api_key.py' to verify your setup")
     
     def rewrite_lyrics(self, original_lyrics, theme):
         """
