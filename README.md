@@ -14,6 +14,8 @@ The pipeline consists of 5 specialized agents:
 
 ## Installation
 
+> 📖 **For detailed setup instructions, see [SETUP.md](SETUP.md)**
+
 This project uses two Python environments to handle different dependency requirements:
 
 ### Main Pipeline (Python 3.12+)
@@ -139,8 +141,33 @@ python pipeline.py --song input.mp3 --theme "space exploration" --artist "Drake"
 
 The project uses a microservice architecture to support different Python versions:
 
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Main Pipeline (Python 3.12+)              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │  Whisper     │  │   Gemini     │  │ ElevenLabs   │      │
+│  │ Transcription│  │Lyric Rewrite │  │Voice Synthesis│      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│  ┌──────────────┐  ┌──────────────┐                        │
+│  │     DTW      │  │    Pydub     │                        │
+│  │  Alignment   │  │    Mixing    │                        │
+│  └──────────────┘  └──────────────┘                        │
+└────────────────────┬────────────────────────────────────────┘
+                     │ HTTP REST API
+                     │ (localhost:5001)
+┌────────────────────┴────────────────────────────────────────┐
+│           Spleeter Service (Python 3.8)                      │
+│  ┌──────────────────────────────────────┐                   │
+│  │  Spleeter Audio Separation (2-stems) │                   │
+│  │  Vocals + Instrumental               │                   │
+│  └──────────────────────────────────────┘                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Components:**
+
 - **Main Pipeline (Python 3.12+)**: Handles transcription, lyric generation, voice synthesis, and mixing
-- **Spleeter Service (Python 3.8)**: Isolated microservice for audio separation via REST API
+- **Spleeter Service (Python 3.8)**: Isolated microservice for audio separation via REST API on port 5001
 
 This separation allows:
 - ✅ Using modern Python features in the main pipeline

@@ -25,10 +25,12 @@ MANIFEST
 
 # Virtual environments
 venv/
+venv38/
 env/
 ENV/
 env.bak/
 venv.bak/
+spleeter_service/venv38/
 .
 # Audio files
 *.wav
@@ -42,6 +44,10 @@ venv.bak/
 output/
 separated/
 pretrained_models/
+
+# Logs
+*.log
+/tmp/
 
 # IDE
 .vscode/
