@@ -1,294 +1,327 @@
-import logging
-import os
-import json
-import traceback
-from google import genai
-from google.genai.errors import APIError
-from flask import Flask, request, jsonify, make_response
-from dotenv import load_dotenv
-
-# --- Configuration and Initialization ---
-
-# Load environment variables (e.g., from 'info.env')
-load_dotenv('info.env')
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# Check if API key is loaded
-if not GEMINI_API_KEY:
-    print("❌ WARNING: GEMINI_API_KEY environment variable is not set! API calls will fail.")
-else:
-    print("✅ GEMINI API key loaded successfully")
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-app = Flask(__name__)
-
-# Initialize the Gemini Client globally
-client = None
-if GEMINI_API_KEY:
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        print("✅ Gemini Client initialized.")
-    except Exception as e:
-        print(f"❌ Failed to initialize Gemini Client: {e}")
-        client = None
-else:
-    print("❌ Gemini Client not initialized due to missing API Key.")
-
-
-# --- Prompt Definitions ---
-
-LYRICS_REWRITE_PROMPT = """
-You are an expert lyricist, poet, and musical composer with advanced understanding of:
-- Songwriting structure and rhythm
-- Syllabic and metric alignment
-- Rhyme schemes and poetic flow
-- Emotional and thematic consistency
-
-## Your Mission
-Rewrite existing song lyrics so that they express a new specified theme, while preserving the rhythm, syllable count, rhyme structure, and musical flow of the original lyrics.  
-The rewritten lyrics should sound natural when sung to the same melody as the original song.
-
-## Input
-Original Lyrics:
-{lyrics}
-
-New Theme:
-{theme}
-
-## Output Format
-Return your result as a **single, valid JSON object** in the following structure. Do not include any text outside the JSON block.
-
-{{
-  "theme": "{theme}",
-  "rewritten_lyrics": "string (the fully rewritten lyrics, line by line, preserving rhythm and rhyme)",
-  "structure_analysis": {{
-    "lines_original": number,
-    "lines_rewritten": number,
-    "syllable_consistency": "high | moderate | low",
-    "rhyme_preservation": "strong | partial | minimal"
-  }},
-  "stylistic_choices": [
-    "Short bullet points explaining creative or poetic choices (e.g., metaphor substitutions, tone adjustments, or emotional shifts)"
-  ],
-  "quality_assurance": [
-    "✅ Rewritten lyrics maintain same line structure and flow",
-    "✅ Rhyme and syllable pattern preserved where musically appropriate",
-    "✅ Theme integrated naturally without forced phrasing",
-    "✅ Hooks and choruses remain catchy and emotionally aligned",
-    "✅ Output is a valid and complete JSON object only"
-  ]
-}}
-
-## Style Guidelines
-- Keep rhythm and pacing similar to the original
-- Preserve emotional intensity and poetic balance
-- Avoid overly literal phrasing; use imagery and metaphor
-- Do not include explanations or commentary outside of the JSON
-
-STRICT RULE: The entire output must be NOTHING but the valid JSON object.
+#!/usr/bin/env python3
+"""
+Test script for VoiceSynthAgent
+Tests voice analysis and synthesis with Gemini + ElevenLabs
+Compatible with Python 3.12+
 """
 
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+import google.generativeai as genai
+from elevenlabs.client import ElevenLabs
+from elevenlabs import save
 
-# --- Utility Functions ---
+# Load environment variables
+load_dotenv()
 
-def _clean_and_parse_json(reply_string: str):
-    """Aggressively cleans LLM output and parses it into JSON."""
-    json_string = reply_string
-            
-    # 1. Aggressively strip markdown fences (```json...```)
-    if json_string.startswith("```"):
-        json_string = json_string.strip().lstrip('```').lstrip('json').strip()
-    if json_string.endswith("```"):
-        json_string = json_string.rstrip('```').strip()
 
-    # 2. Critical fix for Unterminated String Error: Self-healing JSON
-    if not json_string.endswith(('}', ']')):
-        last_brace = json_string.rfind('}')
-        if last_brace != -1:
-            json_string = json_string[:last_brace + 1]
+class VoiceSynthAgent:
+    """
+    Voice Synthesis Agent: Uses Gemini to analyze artist vocal characteristics
+    and intelligently select the best ElevenLabs voice for synthesis
+    """
+
+    def __init__(self, gemini_api_key=None, elevenlabs_api_key=None):
+        # Setup Gemini API
+        self.gemini_api_key = gemini_api_key or os.environ.get('GEMINI_API_KEY')
+        self.elevenlabs_api_key = elevenlabs_api_key or os.environ.get('ELEVENLABS_API_KEY')
+        
+        if not self.gemini_api_key:
+            print("  ⚠ Warning: No Gemini API key found for voice analysis.")
+        
+        if not self.elevenlabs_api_key:
+            print("  ⚠ Warning: No ElevenLabs API key found for voice synthesis.")
+        
+        # Initialize Gemini if available
+        if self.gemini_api_key:
+            try:
+                genai.configure(api_key=self.gemini_api_key)
+                self.gemini_model = genai.GenerativeModel('gemini-pro')
+                print("  ✓ Gemini initialized")
+            except Exception as e:
+                print(f"  ✗ Could not initialize Gemini: {e}")
+                self.gemini_model = None
         else:
-            raise json.JSONDecodeError("Incomplete JSON structure and cannot self-heal.", json_string, 0)
+            self.gemini_model = None
+        
+        # Initialize ElevenLabs client if available
+        if self.elevenlabs_api_key:
+            try:   
+                self.elevenlabs_client = ElevenLabs(api_key=self.elevenlabs_api_key)
+                print("  ✓ ElevenLabs initialized")
+            except Exception as e:
+                print(f"  ✗ Could not initialize ElevenLabs: {e}")
+                self.elevenlabs_client = None
+        else:
+            self.elevenlabs_client = None
 
-    # 3. Convert the cleaned JSON string into a Python dictionary
-    parsed_response = json.loads(json_string)
-    return parsed_response
+    def get_voice_description(self, artist_name):
+        """
+        Use Gemini to generate a detailed voice description based on artist name
+        """
+        if not self.gemini_model:
+            return f"Voice similar to {artist_name}"
+        
+        print(f"\n[Step 1] Analyzing vocal characteristics of {artist_name}...")
+        
+        prompt = f"""Describe the vocal characteristics of {artist_name} in detail for voice synthesis purposes. Include:
 
-# --- Middleware and CORS Helpers ---
+1. Voice type (tenor, baritone, bass, etc.)
+2. Tone quality (warm, raspy, smooth, breathy, crisp, etc.)
+3. Vocal range and register
+4. Distinctive vocal techniques or styles
+5. Emotional delivery style (laid-back, aggressive, melodic, etc.)
+6. Any unique vocal quirks or characteristics
+7. Typical vocal effects (reverb, autotune level, etc.)
 
-@app.before_request
-def log_request_info():
-    print("=" * 50)
-    print("🚀 INCOMING REQUEST")
-    print(f"📝 Method: {request.method}")
-    print(f"🌐 URL: {request.url}")
-    
-    if request.method == 'POST':
+Keep it concise but technical enough for voice synthesis. Format as a single detailed paragraph."""
+
         try:
-            data = request.get_json()
-            print(f"📦 JSON Data keys: {list(data.keys()) if data else 'None'}")
-        except Exception:
-            print(f"❌ Could not parse JSON. Raw Data start: {request.get_data()[:50]}...")
-    print("=" * 50)
+            response = self.gemini_model.generate_content(prompt)
+            description = response.text.strip()
+            print(f"  ✓ Voice description generated")
+            print(f"\n{description}\n")
+            return description
+        except Exception as e:
+            print(f"  ✗ Error generating voice description: {e}")
+            return f"Voice similar to {artist_name}, expressive and clear"
 
-@app.after_request
-def log_response_info(response):
-    print("=" * 50)
-    print("📤 OUTGOING RESPONSE")
-    print(f"📊 Status Code: {response.status_code}")
-    print("=" * 50)
-    return response
-
-def _build_cors_preflight_response():
-    response = make_response()
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add('Access-Control-Allow-Headers', "*")
-    response.headers.add('Access-Control-Allow-Methods', "*")
-    return response
-
-def _corsify_response(response):
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
-
-# --- Routes ---
-
-@app.route('/', methods=['GET'])
-def home():
-    print("🏠 Home route accessed")
-    return jsonify({
-        "message": "Lyrics API is running!", 
-        "status": "ok",
-        "api_key_loaded": bool(GEMINI_API_KEY),
-        "endpoints": {
-            "lyrics": "/lyrics",
-            "health": "/health",
-            "test": "/test"
-        }
-    })
-
-@app.route('/test', methods=['GET', 'POST', 'OPTIONS'])
-def test():
-    if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
-    
-    return _corsify_response(jsonify({
-        "message": "Test route working",
-        "method": request.method,
-    }))
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({
-        "status": "healthy",
-        "services": ["new_lyrics"],
-        "api_key_configured": bool(GEMINI_API_KEY)
-    })
-
-# Lyrics Generation Route
-@app.route('/lyrics', methods=['POST', 'OPTIONS'])
-def generate_lyrics():
-    print("📝" + "=" * 40)
-    print("📝 GENERATE LYRICS ROUTE CALLED")
-    
-    if request.method == "OPTIONS":
-        print("⚡ Handling OPTIONS preflight request")
-        return _build_cors_preflight_response()
-    
-    global client
-    if not client:
-        print("❌ Gemini Client not available")
-        return _corsify_response(jsonify({"error": "Gemini API client not initialized. Check API Key configuration."})), 500
-    
-    try:
-        print("🔍 Starting cover lyrics gen logic...")
-        
-        data = request.get_json()
-        if not data:
-            print("❌ No JSON data provided")
-            return _corsify_response(jsonify({"error": "No JSON data provided"})), 400
-                     
-        lyrics = data.get("lyrics")
-        theme = data.get("theme")
-        if not lyrics or not theme:
-            print("❌ Missing lyrics or theme")
-            return _corsify_response(jsonify({"error": "Both lyrics and theme are required"})), 400
-
-        prompt = LYRICS_REWRITE_PROMPT.format(lyrics=lyrics, theme=theme)
-        
-        print("🚀 Sending request to Gemini API...")
+    def get_available_voices(self):
+        """
+        Get list of available ElevenLabs voices
+        """
+        if not self.elevenlabs_client:
+            return []
         
         try:
-            res = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                response_mime_type="application/json",
-                system_instruction=(
-                    "You are an expert lyricist and creative writing assistant. "
-                    "Your job is to rewrite given song lyrics so that they align with a specified theme, "
-                    "while preserving rhythm, structure, and emotional tone. "
-                    "Always respond with a single, valid JSON object following this schema: "
-                    '{"theme": "string", "rewritten_lyrics": "string"}. '
-                    "Do not include explanations, markdown, or extra text — only the JSON response."
-                ),
-                    temperature=0.7,
-                )
+            response = self.elevenlabs_client.voices.get_all()
+            return response.voices
+        except Exception as e:
+            print(f"  ✗ Error fetching voices: {e}")
+            return []
+
+    def get_best_voice_match(self, voice_description, artist_name):
+        """
+        Use Gemini to intelligently select the best ElevenLabs voice based on description
+        """
+        if not self.gemini_model:
+            return "pNInz6obpgDQGcFmaJgB"  # Default Adam voice ID
+        
+        print(f"[Step 2] Selecting best voice match for {artist_name}...")
+        
+        # Get available voices
+        available_voices = self.get_available_voices()
+        
+        if not available_voices:
+            print("  ⚠ No voices available, using default voice")
+            return "pNInz6obpgDQGcFmaJgB"  # Adam voice ID
+        
+        print(f"  → Found {len(available_voices)} available voices")
+        
+        # Format voice list for Gemini
+        voice_list = []
+        for v in available_voices:
+            voice_info = f"- {v.name} (ID: {v.voice_id})"
+            if hasattr(v, 'labels') and v.labels:
+                labels = ', '.join([f"{k}: {val}" for k, val in v.labels.items()])
+                voice_info += f" - Labels: {labels}"
+            if hasattr(v, 'description') and v.description:
+                voice_info += f" - {v.description}"
+            voice_list.append(voice_info)
+        
+        prompt = f"""You are a voice matching expert. Given this vocal description for {artist_name}:
+
+{voice_description}
+
+Which of these ElevenLabs voices would be the BEST match? Consider:
+- Voice type and gender
+- Tone quality and character
+- Age and maturity
+- Accent and style
+- Overall similarity to the artist
+
+Available voices:
+{chr(10).join(voice_list)}
+
+Return ONLY the exact voice name (e.g., "Adam" or "Rachel"), nothing else. No explanations."""
+
+        try:
+            response = self.gemini_model.generate_content(prompt)
+            voice_name = response.text.strip().replace('"', '').replace("'", '')
+            
+            # Find the voice_id for the selected voice name
+            for v in available_voices:
+                if v.name.lower() == voice_name.lower():
+                    print(f"  ✓ Selected voice: {v.name} (ID: {v.voice_id})")
+                    return v.voice_id
+            
+            # If not found, use first available
+            print(f"  ⚠ Voice '{voice_name}' not found, using first available")
+            print(f"  ✓ Using: {available_voices[0].name}")
+            return available_voices[0].voice_id
+                
+        except Exception as e:
+            print(f"  ✗ Error selecting voice: {e}")
+            return "pNInz6obpgDQGcFmaJgB"  # Default Adam voice ID
+
+    def synthesize_voice(self, lyrics, artist_name=None):
+        """
+        Synthesize new vocals from lyrics using AI-selected voice
+        """
+        print("\n" + "=" * 60)
+        print("VOICE SYNTHESIS TEST")
+        print("=" * 60)
+        
+        # Check if we have the necessary API keys
+        if not self.elevenlabs_client:
+            print("  ✗ Voice synthesis not available (no ElevenLabs API key)")
+            return None
+        
+        # Get voice description from Gemini if artist name provided
+        if artist_name:
+            voice_description = self.get_voice_description(artist_name)
+            selected_voice_id = self.get_best_voice_match(voice_description, artist_name)
+        else:
+            selected_voice_id = "pNInz6obpgDQGcFmaJgB"  # Default Adam voice
+            print(f"[Voice Synth] Using default voice")
+        
+        # Generate vocals with AI-selected voice
+        print(f"\n[Step 3] Generating vocals with voice ID: {selected_voice_id}...")
+        
+        try:
+            audio_generator = self.elevenlabs_client.text_to_speech.convert(
+                text=lyrics,
+                voice_id=selected_voice_id,
+                model_id="eleven_multilingual_v2",
+                output_format="mp3_44100_128",
             )
             
-        except APIError as e:
-            print(f"❌ Gemini API Request Failed: {e}")
-            return _corsify_response(jsonify({"error": f"Gemini API call failed: {str(e)}"})), 500
+            # Save the audio
+            output_dir = Path("output")
+            output_dir.mkdir(exist_ok=True)
+            output_path = output_dir / "test_vocals.mp3"
+            
+            # Convert generator to bytes and save
+            audio_bytes = b"".join(audio_generator)
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes)
+            
+            print(f"  ✓ Vocals generated successfully")
+            print(f"  ✓ Saved to: {output_path}")
+            return str(output_path)
+            
         except Exception as e:
-            print(f"❌ General Error during API call: {e}")
-            print(f"📋 Traceback: {traceback.format_exc()}")
-            return _corsify_response(jsonify({"error": "Internal server error during API call"})), 500
+            print(f"  ✗ Error during voice synthesis: {e}")
+            print(f"     Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            return None
 
-        if res.text is None:
-            block_reason = res.candidates[0].finish_reason.name if (res.candidates and res.candidates[0].finish_reason) else "UNKNOWN"
-            print(f"❌ Content Blocked or Empty. Reason: {block_reason}")
-            
-            return _corsify_response(jsonify({
-                "error": "AI content generation failed or was blocked.",
-                "details": f"Model returned empty content (Finish Reason: {block_reason}). Please review your input.",
-                "finish_reason": block_reason
-            })), 500
 
-        reply_string = res.text.strip()
-        print("✅ Successfully extracted reply string from API")
-        
-        try:
-            parsed_response = _clean_and_parse_json(reply_string)
-            print("✅ AI response is valid JSON")
-            print("🎉 LYRICS GENERATION SUCCESS")
-            
-            return _corsify_response(jsonify(parsed_response))
-            
-        except json.JSONDecodeError as e:
-            print(f"❌ Failed to parse JSON from AI response: {e}")
-            return _corsify_response(jsonify({
-                "error": "AI response was not valid JSON despite request.",
-                "raw_output_start": reply_string[:200],
-                "json_error": str(e)
-            })), 500
-        
-    except Exception as e:
-        print("💥" + "=" * 40)
-        print("💥 LYRICS GENERATION ERROR")
-        print(f"❌ Exception: {str(e)}")
-        print(f"📋 Traceback: {traceback.format_exc()}")
-        print("💥" + "=" * 40)
-        return _corsify_response(jsonify({"error": f"Server error: {str(e)}"})), 500
+def test_voice_synthesis():
+    """
+    Test the VoiceSynthAgent with sample lyrics
+    """
+    print("\n" + "=" * 60)
+    print("TESTING VOICE SYNTHESIS AGENT")
+    print("=" * 60)
+    
+    # Sample lyrics to test with
+    test_lyrics = """
+    We're floating through the cosmos, reaching for the stars,
+    Past the moon and Jupiter, heading straight to Mars.
+    The universe is calling, adventure in our veins,
+    Space exploration dreams running through our brains.
+    """
+    
+    # Test cases
+    test_cases = [
+        {
+            "artist": "Drake",
+            "description": "Testing with Drake's voice style"
+        },
+        {
+            "artist": "J. Cole",
+            "description": "Testing with J. Cole's voice style"
+        },
+        {
+            "artist": "Kendrick Lamar",
+            "description": "Testing with Kendrick Lamar's voice style"
+        }
+    ]
+    
+    # Initialize agent
+    print("\nInitializing VoiceSynthAgent...")
+    agent = VoiceSynthAgent()
+    
+    # Check if APIs are configured
+    if not agent.gemini_api_key:
+        print("\n⚠ Gemini API key not found!")
+        print("Set GEMINI_API_KEY in your .env file or environment")
+        return
+    
+    if not agent.elevenlabs_api_key:
+        print("\n⚠ ElevenLabs API key not found!")
+        print("Set ELEVENLABS_API_KEY in your .env file or environment")
+        return
+    
+    print("\n✓ All APIs configured\n")
+    
+    # Run test for first artist
+    print("=" * 60)
+    print(f"TEST: {test_cases[0]['description']}")
+    print("=" * 60)
+    print(f"\nTest lyrics:\n{test_lyrics}\n")
+    
+    output_path = agent.synthesize_voice(
+        lyrics=test_lyrics.strip(),
+        artist_name=test_cases[0]['artist']
+    )
+    
+    if output_path:
+        print("\n" + "=" * 60)
+        print("TEST COMPLETE!")
+        print("=" * 60)
+        print(f"✓ Audio file created: {output_path}")
+        print("\nYou can play it with:")
+        print(f"  afplay {output_path}  # macOS")
+        print(f"  aplay {output_path}   # Linux")
+        print(f"  start {output_path}   # Windows")
+    else:
+        print("\n✗ Test failed - no audio generated")
+    
+    print("\n" + "=" * 60 + "\n")
 
-# --- App Runner ---
+
+def quick_test(artist_name, lyrics=None):
+    """
+    Quick test function for specific artist
+    """
+    if lyrics is None:
+        lyrics = "Testing one two three, this is a voice synthesis test."
+    
+    print(f"\nQuick test with {artist_name}")
+    print(f"Lyrics: {lyrics}\n")
+    
+    agent = VoiceSynthAgent()
+    output = agent.synthesize_voice(lyrics, artist_name)
+    
+    if output:
+        print(f"\n✓ Success! Play with: afplay {output}")
+    
+    return output
+
+
 if __name__ == "__main__":
-    print("🚀 Starting LYRICS Flask app...")
-    print(f"🔑 API Key loaded: {bool(GEMINI_API_KEY)}")
-    print("📝 Available endpoints:")
-    print("  GET  /                      - Home page")
-    print("  GET  /health                - Health check")
-    print("  POST /lyrics                - new lyrics generation")
-    print("  GET/POST /test              - Test endpoint")
-    print("---------------------------------------")
-    app.run()
+    import sys
+    
+    # Check command line arguments
+    if len(sys.argv) > 1:
+        # Quick test mode
+        artist = sys.argv[1]
+        lyrics = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else None
+        quick_test(artist, lyrics)
+    else:
+        # Full test mode
+        test_voice_synthesis()

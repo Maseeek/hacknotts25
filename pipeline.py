@@ -639,7 +639,6 @@ Provide only the rewritten lyrics, no explanations."""
         return self.rewrite_lyrics(lyrics_data, theme)
 
 
-class VoiceSynthAgent:
     """
     Voice Synthesis Agent: Uses Gemini to analyze artist vocal characteristics
     and intelligently select the best ElevenLabs voice for synthesis
@@ -656,25 +655,28 @@ class VoiceSynthAgent:
         if not self.elevenlabs_api_key:
             print("  ⚠ Warning: No ElevenLabs API key found for voice synthesis.")
         
-        # Initialize Gemini if available
+        # Initialize Gemini
         if self.gemini_api_key:
             try:
-                import google.generativeai as genai
                 genai.configure(api_key=self.gemini_api_key)
                 self.gemini_model = genai.GenerativeModel('gemini-pro')
+                print("  ✓ Gemini initialized")
             except Exception as e:
-                print(f"  ⚠ Could not initialize Gemini: {e}")
+                print(f"  ✗ Could not initialize Gemini: {e}")
                 self.gemini_model = None
         else:
             self.gemini_model = None
         
-        # Initialize ElevenLabs if available
+        # Initialize ElevenLabs
         if self.elevenlabs_api_key:
             try:
-                from elevenlabs import set_api_key
-                set_api_key(self.elevenlabs_api_key)
+                self.elevenlabs_client = ElevenLabs(api_key=self.elevenlabs_api_key)
+                print("  ✓ ElevenLabs initialized")
             except Exception as e:
-                print(f"  ⚠ Could not initialize ElevenLabs: {e}")
+                print(f"  ✗ Could not initialize ElevenLabs: {e}")
+                self.elevenlabs_client = None
+        else:
+            self.elevenlabs_client = None
 
     def get_voice_description(self, artist_name):
         """
@@ -710,10 +712,11 @@ Keep it concise but technical enough for voice synthesis. Format as a single det
         """
         Get list of available ElevenLabs voices
         """
+        if not self.elevenlabs_client:
+            return []
         try:
-            from elevenlabs import voices
-            available_voices = voices()
-            return available_voices
+            response = self.elevenlabs_client.voices.get_all()
+            return response.voices
         except Exception as e:
             print(f"  ✗ Error fetching voices: {e}")
             return []
@@ -723,27 +726,24 @@ Keep it concise but technical enough for voice synthesis. Format as a single det
         Use Gemini to intelligently select the best ElevenLabs voice based on description
         """
         if not self.gemini_model:
-            return "Adam"
+            return "pNInz6obpgDQGcFmaJgB"  # Default Adam voice ID
         
         print(f"[Voice Synth Agent] Selecting best voice match for {artist_name}...")
         
-        # Get available voices
         available_voices = self.get_available_voices()
-        
         if not available_voices:
-            print("  ⚠ No voices available, using default 'Adam'")
-            return "Adam"
+            print("  ⚠ No voices available, using default voice")
+            return "pNInz6obpgDQGcFmaJgB"
         
-        # Format voice list for Gemini
         voice_list = []
         for v in available_voices:
-            voice_info = f"- {v.name}"
-            if hasattr(v, 'labels') and v.labels:
-                labels = ', '.join([f"{k}: {val}" for k, val in v.labels.items()])
-                voice_info += f" ({labels})"
-            if hasattr(v, 'description') and v.description:
-                voice_info += f" - {v.description}"
-            voice_list.append(voice_info)
+            info = f"- {v.name} (ID: {v.voice_id})"
+            if hasattr(v, "labels") and v.labels:
+                labels = ", ".join([f"{k}: {val}" for k, val in v.labels.items()])
+                info += f" - Labels: {labels}"
+            if hasattr(v, "description") and v.description:
+                info += f" - {v.description}"
+            voice_list.append(info)
         
         prompt = f"""You are a voice matching expert. Given this vocal description for {artist_name}:
 
@@ -760,25 +760,24 @@ Available voices:
 {chr(10).join(voice_list)}
 
 Return ONLY the exact voice name (e.g., "Adam" or "Rachel"), nothing else. No explanations."""
-
+        
         try:
             response = self.gemini_model.generate_content(prompt)
             voice_name = response.text.strip().replace('"', '').replace("'", '')
             
-            # Verify the voice exists
-            voice_names = [v.name for v in available_voices]
-            if voice_name in voice_names:
-                print(f"  ✓ Selected voice: {voice_name}")
-                return voice_name
-            else:
-                print(f"  ⚠ Voice '{voice_name}' not found, using 'Adam'")
-                return "Adam"
-                
+            for v in available_voices:
+                if v.name.lower() == voice_name.lower():
+                    print(f"  ✓ Selected voice: {v.name} (ID: {v.voice_id})")
+                    return v.voice_id
+            
+            print(f"  ⚠ Voice '{voice_name}' not found, using first available voice")
+            print(f"  ✓ Using: {available_voices[0].name}")
+            return available_voices[0].voice_id
         except Exception as e:
             print(f"  ✗ Error selecting voice: {e}")
-            return "Adam"
+            return "pNInz6obpgDQGcFmaJgB"
 
-    def synthesize_voice(self, lyrics, reference_vocals_path, artist_name=None, voice_description=None):
+    def synthesize_voice(self, lyrics, reference_vocals_path=None, artist_name=None):
         """
         Synthesize new vocals from lyrics using AI-selected voice
         """
@@ -786,75 +785,47 @@ Return ONLY the exact voice name (e.g., "Adam" or "Rachel"), nothing else. No ex
         print("STAGE 3: VOICE SYNTHESIS")
         print("=" * 60)
         
-        # Check if we have the necessary API keys
-        if not self.elevenlabs_api_key:
-            print("[Voice Synth Agent] Voice synthesis not available (no ElevenLabs API key)")
-            print("  ⚠ Returning original vocals path")
-            return reference_vocals_path
+        if not self.elevenlabs_client:
+            print("[Voice Synth Agent] ElevenLabs not available, returning reference vocals")
+            return reference_vocals_path or None
         
-        # Get voice description from Gemini if artist name provided
-        if artist_name and not voice_description:
+        if artist_name:
             voice_description = self.get_voice_description(artist_name)
-            print(f"\n[Voice Profile for {artist_name}]")
-            print(f"{voice_description}\n")
-        elif voice_description:
-            print(f"\n[Voice Profile]")
-            print(f"{voice_description}\n")
+            selected_voice_id = self.get_best_voice_match(voice_description, artist_name)
         else:
-            voice_description = "Clear, expressive male voice"
-            print(f"\n[Voice Profile] Using default couldn't generate new description: {voice_description}\n")
+            selected_voice_id = "pNInz6obpgDQGcFmaJgB"
+            print("[Voice Synth Agent] Using default voice (Adam)")
         
-        # Use Gemini to intelligently select the best voice
-        if artist_name and self.gemini_model:
-            selected_voice = self.get_best_voice_match(voice_description, artist_name)
-        else:
-            selected_voice = "Adam"
-            print(f"[Voice Synth Agent] Using default voice: {selected_voice}")
-        
-        # Generate vocals with AI-selected voice
-        print(f"[Voice Synth Agent] Generating vocals with {selected_voice}...")
+        print(f"[Voice Synth Agent] Generating vocals with voice ID: {selected_voice_id}...")
         
         try:
-            from elevenlabs import generate
-            
-            audio = generate(
+            audio_gen = self.elevenlabs_client.text_to_speech.convert(
                 text=lyrics,
-                voice=selected_voice,
-                model="eleven_multilingual_v2"
+                voice_id=selected_voice_id,
+                model_id="eleven_multilingual_v2",
+                output_format="mp3_44100_128"
             )
             
-            # Save the audio
             output_dir = Path("output")
             output_dir.mkdir(exist_ok=True)
-            output_path = output_dir / "new_vocals_raw.wav"
+            output_path = output_dir / "new_vocals.mp3"
             
+            audio_bytes = b"".join(audio_gen)
             with open(output_path, "wb") as f:
-                f.write(audio)
+                f.write(audio_bytes)
             
             print(f"  ✓ Vocals generated successfully")
             print(f"  ✓ Saved to: {output_path}")
             return str(output_path)
-            
         except Exception as e:
             print(f"  ✗ Error during voice synthesis: {e}")
-            print(f"  → Returning original vocals path")
-            return reference_vocals_path
+            return reference_vocals_path or None
 
     def process(self, lyrics_data, vocals_path, artist_name=None):
         """
-        Main processing for voice synthesis
-        
-        Args:
-            lyrics_data: Dictionary containing lyrics (e.g., {'rewritten': '...', 'original': ...})
-            vocals_path: Path to reference vocals
-            artist_name: Name of artist to match voice style (optional)
-            
-        Returns:
-            Path to synthesized vocals file
+        Main pipeline for voice synthesis
         """
-        # Extract lyrics from data
         if isinstance(lyrics_data, dict):
-            # Use rewritten lyrics if available, otherwise original
             lyrics = lyrics_data.get('rewritten', lyrics_data.get('original', {}).get('text', ''))
         else:
             lyrics = str(lyrics_data)
@@ -864,6 +835,7 @@ Return ONLY the exact voice name (e.g., "Adam" or "Rachel"), nothing else. No ex
             reference_vocals_path=vocals_path,
             artist_name=artist_name
         )
+
 
 
 class AlignerAgent:
