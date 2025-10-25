@@ -1,0 +1,10 @@
+openai-whisper
+google-generativeai>=0.3.0
+librosa
+fastdtw
+pydub
+numpy
+scipy
+python-dotenv
+requests
+elevenlabs

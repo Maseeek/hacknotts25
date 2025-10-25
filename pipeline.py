@@ -462,42 +462,60 @@ load_dotenv()
 class PreProcessAgent:
     """
     Pre-process Agent: Separates vocals from instrumental and extracts lyrics with timing
-    Uses Spleeter for separation and Whisper for transcription
+    Uses Spleeter service for separation and Whisper for transcription
     """
 
-    def __init__(self):
+    def __init__(self, spleeter_service_url="http://localhost:5001"):
         self.output_dir = Path("output")
         self.output_dir.mkdir(exist_ok=True)
+        self.spleeter_service_url = spleeter_service_url
 
     def separate_audio(self, song_path):
         """
-        Separate vocals from instrumental using Spleeter
+        Separate vocals from instrumental using Spleeter service
         """
         print("[Pre-Process Agent] Separating vocals and instrumental...")
 
         try:
-            from spleeter.separator import Separator
+            import requests
 
-            # Initialize Spleeter with 2 stems (vocals + accompaniment)
-            separator = Separator('spleeter:2stems')
+            # Convert to absolute path
+            audio_path = str(Path(song_path).resolve())
+            output_dir = str((self.output_dir / "separated").resolve())
 
-            # Create output directory
-            song_name = Path(song_path).stem
-            output_path = self.output_dir / "separated" / song_name
-            output_path.mkdir(parents=True, exist_ok=True)
+            # Call Spleeter service
+            print(f"  → Calling Spleeter service at {self.spleeter_service_url}")
+            response = requests.post(
+                f"{self.spleeter_service_url}/separate",
+                json={
+                    "audio_path": audio_path,
+                    "output_dir": output_dir
+                },
+                timeout=300  # 5 minute timeout for large files
+            )
 
-            # Separate audio
-            separator.separate_to_file(song_path, str(self.output_dir / "separated"))
+            if response.status_code != 200:
+                error_msg = response.json().get('error', 'Unknown error')
+                raise Exception(f"Spleeter service error: {error_msg}")
 
-            # Get paths to separated files
-            vocals_path = output_path / "vocals.wav"
-            instrumental_path = output_path / "accompaniment.wav"
+            result = response.json()
+
+            if not result.get('success'):
+                raise Exception(f"Separation failed: {result.get('error', 'Unknown error')}")
+
+            vocals_path = result['vocals_path']
+            instrumental_path = result['instrumental_path']
 
             print(f"  ✓ Vocals saved to: {vocals_path}")
             print(f"  ✓ Instrumental saved to: {instrumental_path}")
 
-            return str(vocals_path), str(instrumental_path)
+            return vocals_path, instrumental_path
 
+        except requests.exceptions.ConnectionError:
+            print(f"  ✗ Could not connect to Spleeter service at {self.spleeter_service_url}")
+            print(f"  → Make sure the Spleeter service is running:")
+            print(f"     cd spleeter_service && python3.8 app.py")
+            raise Exception("Spleeter service not available")
         except Exception as e:
             print(f"  ✗ Error during separation: {e}")
             raise

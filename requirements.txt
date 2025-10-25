@@ -1,9 +1,11 @@
-spleeter
-openai-whisper
-google-generativeai>=0.3.0
-librosa
-fastdtw
-pydub
-numpy
-scipy
-python-dotenv
+# DEPRECATED: This file is kept for backward compatibility
+# 
+# This project now uses separate requirements files:
+# - requirements-main.txt: For the main pipeline (Python 3.12+)
+# - spleeter_service/requirements.txt: For the Spleeter service (Python 3.8)
+#
+# See README.md for updated installation instructions
+#
+# To install main dependencies:
+#   pip install -r requirements-main.txt
+

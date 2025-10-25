@@ -14,9 +14,46 @@ The pipeline consists of 5 specialized agents:
 
 ## Installation
 
-```bash
-pip install -r requirements.txt
-```
+This project uses two Python environments to handle different dependency requirements:
+
+### Main Pipeline (Python 3.12+)
+
+The main pipeline, lyric generation, voice synthesis, and mixing components run on Python 3.12 or higher.
+
+1. **Create a virtual environment** (recommended):
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements-main.txt
+   ```
+
+### Spleeter Service (Python 3.8)
+
+Audio separation requires Python 3.8 due to Spleeter library compatibility. This runs as a separate microservice.
+
+1. **Navigate to the service directory**:
+   ```bash
+   cd spleeter_service
+   ```
+
+2. **Run the setup script** (creates virtual environment and installs dependencies):
+   ```bash
+   ./start.sh
+   ```
+
+   Or manually:
+   ```bash
+   python3.8 -m venv venv38
+   source venv38/bin/activate
+   pip install -r requirements.txt
+   python app.py
+   ```
+
+See [`spleeter_service/README.md`](spleeter_service/README.md) for detailed setup instructions.
 
 ## Setup
 
@@ -43,38 +80,91 @@ This will:
 - Verify that the API key is set
 - Test connectivity to the Gemini API (if a valid key is provided)
 
-## Usage
+### Testing Spleeter Service
+
+To verify the Spleeter service is set up correctly:
 
 ```bash
+python test_spleeter_service.py
+```
+
+## Usage
+
+### Option 1: Automatic (Recommended)
+
+Use the convenience script that manages both services:
+
+```bash
+./run_pipeline.sh --song <path_to_song> --theme <theme>
+```
+
+This script will:
+- Automatically start the Spleeter service if it's not running
+- Run the main pipeline
+- Keep the Spleeter service running for subsequent uses
+
+### Option 2: Manual Control
+
+**Terminal 1 - Start Spleeter Service (Python 3.8):**
+```bash
+cd spleeter_service
+./start.sh
+```
+
+**Terminal 2 - Run Main Pipeline (Python 3.12+):**
+```bash
+source venv/bin/activate  # If using virtual environment
 python pipeline.py --song <path_to_song> --theme <theme>
 ```
 
 ### Examples
 
 ```bash
-# Transform a song with a space exploration theme
-python pipeline.py --song input.mp3 --theme "space exploration"
+# Using the convenience script (recommended)
+./run_pipeline.sh --song input.mp3 --theme "space exploration"
+./run_pipeline.sh --song my_song.wav --theme "medieval fantasy" --artist "Drake"
 
-# Rewrite lyrics with a medieval fantasy theme
+# Or manually if services are already running
+python pipeline.py --song input.mp3 --theme "space exploration"
 python pipeline.py --song my_song.wav --theme "medieval fantasy"
+python pipeline.py --song input.mp3 --theme "space exploration" --artist "Drake"
 ```
 
 ### Environment Variables
 
 - `GEMINI_API_KEY`: Required for lyric generation (Stage 2)
+- `ELEVENLABS_API_KEY`: Optional for voice synthesis (Stage 3)
+
+## Architecture
+
+The project uses a microservice architecture to support different Python versions:
+
+- **Main Pipeline (Python 3.12+)**: Handles transcription, lyric generation, voice synthesis, and mixing
+- **Spleeter Service (Python 3.8)**: Isolated microservice for audio separation via REST API
+
+This separation allows:
+- ✅ Using modern Python features in the main pipeline
+- ✅ Maintaining compatibility with Spleeter's Python 3.8 requirement
+- ✅ Easy deployment and scaling of individual components
 
 ## Requirements
 
-- Python 3.7+ (currently running 3.8 due to issues with spleeter module on higher versions)
-- Dependencies listed in `requirements.txt`:
-  - spleeter (audio separation)
+### Main Pipeline (Python 3.12+)
+- Dependencies in `requirements-main.txt`:
   - openai-whisper (speech-to-text)
   - google-generativeai >=0.3.0 (lyric generation with Gemini)
+  - elevenlabs (voice synthesis)
   - librosa (audio processing)
   - fastdtw (for future alignment)
   - pydub (audio mixing)
   - numpy, scipy (numerical processing)
   - python-dotenv (environment variable loading)
+  - requests (API communication)
+
+### Spleeter Service (Python 3.8)
+- Dependencies in `spleeter_service/requirements.txt`:
+  - spleeter (audio separation)
+  - flask (REST API server)
 
 ## Pipeline Stages
 
