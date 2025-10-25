@@ -125,7 +125,7 @@ class LyricGenerationAgent:
 
             prompt = f"""
             Rewrite the following song lyrics to fit the theme: "{theme}"
-            Maintain the rhythm, syllable count, and flow.
+            Maintain the rhythm, syllable count, rhyme scheme and flow.
 
             Original:
             {original_lyrics['text']}
@@ -137,7 +137,7 @@ class LyricGenerationAgent:
             if not rewritten:
                 raise ValueError("Empty response from Gemini")
 
-            print(f"  ✓ New lyrics generated."{rewritten})
+            print(f"  ✓ New lyrics generated.{rewritten}")
             return {"original": original_lyrics, "rewritten": rewritten, "theme": theme}
 
         except Exception as e:
