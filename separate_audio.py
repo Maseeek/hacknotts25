@@ -1,34 +1,25 @@
+"""
+Audio separation functionality (removed - Spleeter requires Python 3.8)
+
+This file previously contained audio separation functionality using the Spleeter library,
+which is not compatible with Python 3.12. The functionality has been removed.
+
+For audio separation, you will need to:
+1. Use a separate Python 3.8 environment with Spleeter, or
+2. Use alternative audio separation tools compatible with Python 3.12
+"""
+
 from pathlib import Path
-@app.route('/split', methods=['POST'])
-def separate_audio(self, song_path):
-        """
-        Separate vocals and instrumental using Spleeter
-        Returns paths to separated files
-        """
-        print("[Pre-Process Agent] Separating vocals and instrumental...")
 
-        try:
-            from spleeter.separator import Separator
+# Note: Flask app and route removed as the Spleeter-based functionality
+# is not compatible with Python 3.12
 
-            # Use 2stems model (vocals and accompaniment)
-            separator = Separator('spleeter:2stems')
-
-            # Separate the audio
-            song_name = Path(song_path).stem
-            output_path = self.output_dir / "separated" / song_name
-
-            separator.separate_to_file(song_path, str(self.output_dir / "separated"))
-
-            vocals_path = output_path / "vocals.wav"
-            instrumental_path = output_path / "instrumental.wav"
-
-            print(f"  ✓ Vocals saved to: {vocals_path}")
-            print(f"  ✓ Instrumental saved to: {instrumental_path}")
-
-            return str(vocals_path), str(instrumental_path)
-
-        except Exception as e:
-            print(f"  ✗ Error during separation: {e}")
-            raise
-if __name__ == '__main__':
-    app.run(port=5001)
+def separate_audio_unavailable():
+    """
+    Audio separation is unavailable in Python 3.12.
+    This function serves as a placeholder.
+    """
+    raise NotImplementedError(
+        "Audio separation using Spleeter requires Python 3.8. "
+        "Please use a separate Python 3.8 environment for this functionality."
+    )

@@ -472,35 +472,19 @@ class PreProcessAgent:
     def separate_audio(self, song_path):
         """
         Separate vocals from instrumental using Spleeter
+        
+        NOTE: This functionality is disabled as Spleeter requires Python 3.8.
+        This method will raise an error if called.
         """
-        print("[Pre-Process Agent] Separating vocals and instrumental...")
-
-        try:
-            from spleeter.separator import Separator
-
-            # Initialize Spleeter with 2 stems (vocals + accompaniment)
-            separator = Separator('spleeter:2stems')
-
-            # Create output directory
-            song_name = Path(song_path).stem
-            output_path = self.output_dir / "separated" / song_name
-            output_path.mkdir(parents=True, exist_ok=True)
-
-            # Separate audio
-            separator.separate_to_file(song_path, str(self.output_dir / "separated"))
-
-            # Get paths to separated files
-            vocals_path = output_path / "vocals.wav"
-            instrumental_path = output_path / "accompaniment.wav"
-
-            print(f"  ✓ Vocals saved to: {vocals_path}")
-            print(f"  ✓ Instrumental saved to: {instrumental_path}")
-
-            return str(vocals_path), str(instrumental_path)
-
-        except Exception as e:
-            print(f"  ✗ Error during separation: {e}")
-            raise
+        raise NotImplementedError(
+            "Audio separation using Spleeter is not available in Python 3.12. "
+            "The Spleeter library requires Python 3.8. "
+            "\n\nTo use audio separation, you have two options:"
+            "\n1. Run audio separation in a separate Python 3.8 environment with Spleeter installed"
+            "\n2. Use pre-separated audio files (vocals and instrumental) instead"
+            "\n\nIf you have pre-separated files, you can skip this step and provide "
+            "the paths directly to the transcription step."
+        )
 
     def transcribe_lyrics(self, vocals_path):
         """

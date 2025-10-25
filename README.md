@@ -65,9 +65,8 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
 
 ## Requirements
 
-- Python 3.7+ (currently running 3.8 due to issues with spleeter module on higher versions)
+- Python 3.12+ (upgraded from 3.8)
 - Dependencies listed in `requirements.txt`:
-  - spleeter (audio separation)
   - openai-whisper (speech-to-text)
   - google-generativeai >=0.3.0 (lyric generation with Gemini)
   - librosa (audio processing)
@@ -76,10 +75,23 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
   - numpy, scipy (numerical processing)
   - python-dotenv (environment variable loading)
 
+### Note on Audio Separation
+
+**Spleeter has been removed** from this project as it requires Python 3.8 and is not compatible with Python 3.12.
+
+If you need audio separation (vocals from instrumental), you have two options:
+
+1. **Use a separate Python 3.8 environment**: Create a dedicated Python 3.8 environment, install Spleeter there, and run audio separation separately
+2. **Use pre-separated audio files**: If you already have separated vocal and instrumental tracks, you can provide them directly to the pipeline
+
+The rest of the pipeline (lyric generation, voice synthesis, mixing, etc.) now runs on Python 3.12.
+
 ## Pipeline Stages
 
 ### Stage 1: Pre-Processing
-- Separates audio into vocals and instrumental tracks using Spleeter
+- **Audio separation has been removed** (Spleeter requires Python 3.8)
+  - Option 1: Use pre-separated vocal and instrumental tracks
+  - Option 2: Run Spleeter in a separate Python 3.8 environment
 - Transcribes lyrics with word-level timestamps using Whisper
 
 ### Stage 2: Lyric Generation
