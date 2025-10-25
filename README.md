@@ -69,7 +69,7 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
 - Dependencies listed in `requirements.txt`:
   - spleeter (audio separation)
   - openai-whisper (speech-to-text)
-  - google-generativeai (lyric generation with Gemini)
+  - google-generativeai >=0.3.0 (lyric generation with Gemini)
   - librosa (audio processing)
   - fastdtw (for future alignment)
   - pydub (audio mixing)
