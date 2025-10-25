@@ -9,6 +9,7 @@ import sys
 import requests
 from pathlib import Path
 from dotenv import load_dotenv
+import whisper
 
 # Load environment variables
 load_dotenv()
@@ -19,8 +20,9 @@ load_dotenv()
 # =====================================================
 class PreProcessAgent:
     """
-    Handles audio preprocessing — communicates with a Flask Spleeter microservice
-    to separate vocals and instrumentals.
+    Handles audio preprocessing:
+    - Uses Flask Spleeter microservice for vocal separation
+    - Uses OpenAI Whisper for lyric transcription with timestamps
     """
 
     def __init__(self, spleeter_service_url="http://127.0.0.1:5001/split"):
@@ -32,8 +34,8 @@ class PreProcessAgent:
         print("[Pre-Process Agent] Requesting audio separation from Spleeter service...")
 
         try:
-            with open(song_path, 'rb') as f:
-                files = {'file': (Path(song_path).name, f, 'audio/mpeg')}
+            with open(song_path, "rb") as f:
+                files = {"file": (Path(song_path).name, f, "audio/mpeg")}
                 response = requests.post(self.spleeter_service_url, files=files)
 
             if response.status_code != 200:
@@ -54,6 +56,48 @@ class PreProcessAgent:
             print(f"  ✗ Error contacting Spleeter service: {e}")
             raise
 
+    def transcribe_lyrics(self, vocals_path):
+        """
+        Transcribe lyrics and timing using Whisper.
+        Returns lyrics with word-level timestamps.
+        """
+        print("[Pre-Process Agent] Transcribing vocals with Whisper...")
+
+        try:
+            model = whisper.load_model("base")
+            result = model.transcribe(vocals_path, word_timestamps=True)
+
+            lyrics_data = {
+                "text": result["text"],
+                "segments": result.get("segments", []),
+                "language": result.get("language", "unknown"),
+            }
+
+            print(f"  ✓ Transcribed {len(lyrics_data['segments'])} segments")
+            print(f"  ✓ Language: {lyrics_data['language']}")
+            print(f"  ✓ Sample text: {lyrics_data['text'][:100]}...")
+            return lyrics_data
+
+        except Exception as e:
+            print(f"  ✗ Whisper transcription failed: {e}")
+            raise
+
+    def process(self, song_path):
+        """
+        Main processing pipeline.
+        """
+        print("\n" + "=" * 60)
+        print("STAGE 1: PRE-PROCESSING")
+        print("=" * 60)
+
+        vocals_path, instrumental_path = self.separate_audio(song_path)
+        lyrics_data = self.transcribe_lyrics(vocals_path)
+
+        return {
+            "vocals_path": vocals_path,
+            "instrumental_path": instrumental_path,
+            "lyrics_data": lyrics_data,
+        }
 
 # =====================================================
 # 2️⃣ LYRIC GENERATION AGENT
@@ -93,7 +137,7 @@ class LyricGenerationAgent:
             if not rewritten:
                 raise ValueError("Empty response from Gemini")
 
-            print("  ✓ New lyrics generated.")
+            print(f"  ✓ New lyrics generated."{rewritten})
             return {"original": original_lyrics, "rewritten": rewritten, "theme": theme}
 
         except Exception as e:
@@ -324,15 +368,16 @@ class SongPipeline:
         print("AI SONG PIPELINE STARTED")
         print("=" * 60)
 
-        preprocess = self.preprocess_agent.separate_audio(song_path)
 
-        # Placeholder lyrics transcription
-        lyrics_data = {"text": "This is a placeholder for transcribed lyrics."}
+
+        preprocess = self.preprocess_agent.process(song_path)
+        lyrics_data = preprocess["lyrics_data"]
 
         rewritten = self.lyric_gen_agent.process(lyrics_data, theme)
         synth_vocals = self.voice_synth_agent.process(rewritten, artist_name=artist_name)
         aligned = self.aligner_agent.process(synth_vocals, lyrics_data)
-        final = self.mixer_agent.process(aligned, preprocess[1], f"{Path(song_path).stem}_remix")
+        final = self.mixer_agent.process(preprocess["vocals_path"], preprocess["instrumental_path"], f"{Path(song_path).stem}_remix")
+        
 
         print("\n✓ PIPELINE COMPLETE.")
         return final
