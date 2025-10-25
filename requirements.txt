@@ -6,3 +6,4 @@ fastdtw
 pydub
 numpy
 scipy
+python-dotenv
