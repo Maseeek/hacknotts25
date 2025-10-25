@@ -165,58 +165,60 @@ Return ONLY the exact voice name (e.g., "Adam" or "Rachel"), nothing else. No ex
             print(f"  ✗ Error selecting voice: {e}")
             return "pNInz6obpgDQGcFmaJgB"  # Default Adam voice ID
 
-    def synthesize_voice(self, lyrics, artist_name=None):
-        """
-        Synthesize new vocals from lyrics using AI-selected voice
-        """
-        print("\n" + "=" * 60)
-        print("VOICE SYNTHESIS TEST")
-        print("=" * 60)
+def synthesize_voice(self, lyrics, artist_name=None):
+    """
+    Synthesize new vocals from lyrics using AI-selected voice
+    """
+    print("\n" + "=" * 60)
+    print("VOICE SYNTHESIS TEST")
+    print("=" * 60)
+    
+    # Check if we have the necessary API keys
+    if not self.elevenlabs_client:
+        print("  ✗ Voice synthesis not available (no ElevenLabs API key)")
+        return None
+    
+    # Get voice description from Gemini if artist name provided
+    if artist_name:
+        voice_description = self.get_voice_description(artist_name)
+        selected_voice_id = self.get_best_voice_match(voice_description, artist_name)
+    else:
+        selected_voice_id = "pNInz6obpgDQGcFmaJgB"  # Default Adam voice
+        print(f"[Voice Synth] Using default voice")
+    
+    # Generate vocals with AI-selected voice
+    print(f"\n[Step 3] Generating vocals with voice ID: {selected_voice_id}...")
+    
+    try:
+        # Generate audio using the new ElevenLabs API
+        audio_generator = self.elevenlabs_client.text_to_speech.convert(
+            text=lyrics,
+            voice_id=selected_voice_id,
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128",
+        )
         
-        # Check if we have the necessary API keys
-        if not self.elevenlabs_client:
-            print("  ✗ Voice synthesis not available (no ElevenLabs API key)")
-            return None
+        # Save the audio
+        output_dir = Path("output")
+        output_dir.mkdir(exist_ok=True)
+        output_path = output_dir / "test_vocals.mp3"
         
-        # Get voice description from Gemini if artist name provided
-        if artist_name:
-            voice_description = self.get_voice_description(artist_name)
-            selected_voice_id = self.get_best_voice_match(voice_description, artist_name)
-        else:
-            selected_voice_id = "pNInz6obpgDQGcFmaJgB"  # Default Adam voice
-            print(f"[Voice Synth] Using default voice")
+        # Convert generator to bytes and save
+        audio_bytes = b"".join(audio_generator)
+        with open(output_path, "wb") as f:
+            f.write(audio_bytes)
         
-        # Generate vocals with AI-selected voice
-        print(f"\n[Step 3] Generating vocals with voice ID: {selected_voice_id}...")
+        print(f"  ✓ Vocals generated successfully")
+        print(f"  ✓ Saved to: {output_path}")
+        return str(output_path)
         
-        try:
-            # Generate audio using the new API
-            audio_generator = self.elevenlabs_client.generate(
-                text=lyrics,
-                voice=selected_voice_id,
-                model="eleven_multilingual_v2"
-            )
-            
-            # Save the audio
-            output_dir = Path("output")
-            output_dir.mkdir(exist_ok=True)
-            output_path = output_dir / "test_vocals.mp3"
-            
-            # Convert generator to bytes and save
-            audio_bytes = b"".join(audio_generator)
-            with open(output_path, "wb") as f:
-                f.write(audio_bytes)
-            
-            print(f"  ✓ Vocals generated successfully")
-            print(f"  ✓ Saved to: {output_path}")
-            return str(output_path)
-            
-        except Exception as e:
-            print(f"  ✗ Error during voice synthesis: {e}")
-            print(f"     Error type: {type(e).__name__}")
-            import traceback
-            traceback.print_exc()
-            return None
+    except Exception as e:
+        print(f"  ✗ Error during voice synthesis: {e}")
+        print(f"     Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 
 
 def test_voice_synthesis():

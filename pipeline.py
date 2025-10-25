@@ -107,72 +107,78 @@ class LyricGenerationAgent:
 # =====================================================
 # 3️⃣ VOICE SYNTHESIS AGENT
 # =====================================================
+import os
+from pathlib import Path
+
 class VoiceSynthAgent:
     """
-    Voice Synthesis Agent: Uses Gemini to select an ideal ElevenLabs voice,
-    then synthesizes vocals using the rewritten lyrics.
+    Voice Synthesis Agent:
+    - Uses Gemini to analyze artist's voice style.
+    - Selects a matching ElevenLabs voice.
+    - Synthesizes vocals using rewritten lyrics.
     """
 
     def __init__(self, gemini_api_key=None, elevenlabs_api_key=None):
         import google.generativeai as genai
-        from elevenlabs import ElevenLabs
+        from elevenlabs.client import ElevenLabs  # ✅ correct import
 
-        self.gemini_api_key = gemini_api_key or os.environ.get("GEMINI_API_KEY")
-        self.elevenlabs_api_key = elevenlabs_api_key or os.environ.get("ELEVENLABS_API_KEY")
+        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+        self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
 
-        self.genai = genai
-        self.ElevenLabs = ElevenLabs
-
+        # Initialize Gemini (optional)
         self.gemini_model = None
-        self.eleven_client = None
-
-        # Gemini setup
         if self.gemini_api_key:
             try:
                 genai.configure(api_key=self.gemini_api_key)
-                self.gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+                self.gemini_model = genai.GenerativeModel("gemini-2.0-flash")
                 print("  ✓ Gemini initialized for voice analysis.")
             except Exception as e:
-                print(f"  ✗ Gemini init error: {e}")
+                print(f"  ✗ Gemini initialization failed: {e}")
 
-        # ElevenLabs setup
-        if self.elevenlabs_api_key:
-            try:
-                self.eleven_client = ElevenLabs(api_key=self.elevenlabs_api_key)
-                print("  ✓ ElevenLabs initialized for TTS.")
-            except Exception as e:
-                print(f"  ✗ ElevenLabs init error: {e}")
+        # Initialize ElevenLabs
+        self.eleven_client = None
+        try:
+            self.eleven_client = ElevenLabs(api_key=self.elevenlabs_api_key)
+            print("  ✓ ElevenLabs initialized for TTS.")
+        except Exception as e:
+            print(f"  ✗ ElevenLabs init error: {e}")
 
-    def analyze_voice(self, artist_name):
+    # =============================================================
+    # VOICE SELECTION STAGE
+    # =============================================================
+
+    def analyze_voice(self, artist_name: str) -> str:
         """
-        Describe the artist's voice for matching with ElevenLabs.
+        Use Gemini to describe artist's voice (tone, timbre, range).
         """
         if not self.gemini_model:
             return f"A voice similar to {artist_name}"
 
-        prompt = f"Describe {artist_name}'s vocal tone and style in technical terms (timbre, tone, range, energy)."
+        prompt = f"Describe {artist_name}'s vocal tone, timbre, and range in detail."
         try:
             resp = self.gemini_model.generate_content(prompt)
             return resp.text.strip()
         except Exception:
-            return f"Voice similar to {artist_name}"
+            return f"A voice similar to {artist_name}"
 
-    def pick_best_voice(self, description):
+    def pick_best_voice(self, voice_description: str) -> str:
         """
-        Use Gemini to pick best ElevenLabs voice from list.
+        Use Gemini to select the most fitting ElevenLabs voice.
         """
         if not self.gemini_model or not self.eleven_client:
-            return "pNInz6obpgDQGcFmaJgB"
+            return "pNInz6obpgDQGcFmaJgB"  # Default Adam
 
         try:
             voices = self.eleven_client.voices.get_all().voices
-            voice_list = "\n".join([f"- {v.name}: {v.description}" for v in voices if hasattr(v, "description")])
+            voice_list = "\n".join(
+                [f"- {v.name}: {getattr(v, 'description', 'No description')}" for v in voices]
+            )
 
             prompt = f"""
             Based on this voice description:
-            {description}
+            {voice_description}
 
-            Which ElevenLabs voice from below fits best?
+            Choose the best matching ElevenLabs voice from:
             {voice_list}
 
             Return only the voice name.
@@ -186,55 +192,80 @@ class VoiceSynthAgent:
                     print(f"  ✓ Voice selected: {v.name}")
                     return v.voice_id
 
-            print("  ⚠ No match found, using default.")
+            print("  ⚠ No exact match found, using default voice.")
             return "pNInz6obpgDQGcFmaJgB"
 
         except Exception as e:
             print(f"  ✗ Voice match error: {e}")
             return "pNInz6obpgDQGcFmaJgB"
 
-    def synthesize_voice(self, lyrics, artist_name="Unknown Artist"):
+    # =============================================================
+    # SYNTHESIS STAGE
+    # =============================================================
+
+    def synthesize_voice(self, lyrics: str, artist_name: str = None) -> str | None:
         """
-        Generate a new vocal track using ElevenLabs.
+        Generate vocals from lyrics using the best ElevenLabs voice.
         """
         print("\n" + "=" * 60)
-        print("STAGE 3: VOICE SYNTHESIS")
+        print("VOICE SYNTHESIS")
         print("=" * 60)
 
         if not self.eleven_client:
-            print("  ✗ ElevenLabs client not available.")
+            print("  ✗ ElevenLabs client not initialized — cannot synthesize voice.")
             return None
 
-        voice_description = self.analyze_voice(artist_name)
-        voice_id = self.pick_best_voice(voice_description)
+        # Analyze & pick voice
+        if artist_name:
+            description = self.analyze_voice(artist_name)
+            voice_id = self.pick_best_voice(description)
+        else:
+            voice_id = "pNInz6obpgDQGcFmaJgB"  # Default
+            print("  ⚙ Using default ElevenLabs voice.")
+
+        # Generate audio
+        print(f"  🎤 Generating vocals using voice ID: {voice_id}")
 
         try:
-            audio_stream = self.eleven_client.generate(
+            audio_generator = self.eleven_client.text_to_speech.convert(
+                voice_id=voice_id,
+                model_id="eleven_multilingual_v2",
                 text=lyrics,
-                voice=voice_id,
-                model="eleven_multilingual_v2"
+                output_format="mp3_44100_128"
             )
 
-            output_path = Path("output/synthesized_vocals.mp3")
-            with open(output_path, "wb") as f:
-                for chunk in audio_stream:
-                    f.write(chunk)
+            output_dir = Path("output")
+            output_dir.mkdir(exist_ok=True)
+            output_path = output_dir / "generated_vocals.mp3"
 
-            print(f"  ✓ Synthesized vocals saved: {output_path}")
+            audio_bytes = b"".join(audio_generator)
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes)
+
+            print(f"  ✓ Vocals successfully saved to {output_path}")
             return str(output_path)
 
         except Exception as e:
             print(f"  ✗ Voice synthesis failed: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
-    def process(self, lyrics_data, vocals_path=None, artist_name=None):
+    # =============================================================
+    # PIPELINE INTERFACE
+    # =============================================================
+
+    def process(self, lyrics_data: dict, artist_name: str = None):
+        """
+        Pipeline entrypoint — expects `lyrics_data` from previous stage.
+        """
         lyrics = (
             lyrics_data.get("rewritten")
             if isinstance(lyrics_data, dict)
             else str(lyrics_data)
         )
-        return self.synthesize_voice(lyrics, artist_name or "Unknown")
 
+        return self.synthesize_voice(lyrics, artist_name or "Unknown Artist")
 
 # =====================================================
 # 4️⃣ ALIGNER AGENT
