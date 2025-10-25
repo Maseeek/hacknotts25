@@ -105,6 +105,26 @@ response = requests.post(f"{service_url}/separate", json={...})
 - **Monitoring**: Two processes to monitor instead of one
 - **Benefit**: Isolated failures - Spleeter crash doesn't affect main pipeline
 
+## Security Features
+
+The implementation includes several security measures:
+
+### Path Injection Protection
+- **Input Validation**: All file paths are validated and sanitized
+- **Allowed Extensions**: Only approved audio formats (.mp3, .wav, .flac, .ogg, .m4a)
+- **File Size Limits**: Maximum 500MB to prevent resource exhaustion
+- **Path Resolution**: Absolute path resolution prevents directory traversal
+
+### Error Handling
+- **Generic Error Messages**: Client receives sanitized error messages
+- **Server-Side Logging**: Full stack traces logged server-side only
+- **No Information Leakage**: Internal paths and system details not exposed
+
+### Configuration
+- **Debug Mode Control**: Debug mode disabled by default (set `FLASK_DEBUG=true` for development)
+- **Localhost Binding**: Service binds to localhost by default
+- **Production Ready**: Clear separation between dev and production configs
+
 ## Usage
 
 ### Quick Start
