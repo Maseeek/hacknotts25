@@ -45,23 +45,26 @@ This will:
 
 ## Usage
 
+**Note**: Audio separation (Spleeter) is not available in Python 3.12. You must provide pre-separated vocals and instrumental files.
+
 ```bash
-python pipeline.py --song <path_to_song> --theme <theme>
+python pipeline.py --vocals <vocals.wav> --instrumental <instrumental.wav> --theme <theme>
 ```
 
 ### Examples
 
 ```bash
-# Transform a song with a space exploration theme
-python pipeline.py --song input.mp3 --theme "space exploration"
+# Transform pre-separated audio with a space exploration theme
+python pipeline.py --vocals vocals.wav --instrumental instrumental.wav --theme "space exploration"
 
-# Rewrite lyrics with a medieval fantasy theme
-python pipeline.py --song my_song.wav --theme "medieval fantasy"
+# Rewrite lyrics with a medieval fantasy theme and specific artist voice style
+python pipeline.py --vocals vocals.wav --instrumental instrumental.wav --theme "medieval fantasy" --artist "Drake"
 ```
 
 ### Environment Variables
 
 - `GEMINI_API_KEY`: Required for lyric generation (Stage 2)
+- `ELEVENLABS_API_KEY`: Required for voice synthesis (Stage 3)
 
 ## Requirements
 

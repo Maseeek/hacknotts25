@@ -461,8 +461,14 @@ load_dotenv()
 
 class PreProcessAgent:
     """
-    Pre-process Agent: Separates vocals from instrumental and extracts lyrics with timing
-    Uses Spleeter for separation and Whisper for transcription
+    Pre-process Agent: Extracts lyrics with timing from audio
+    
+    NOTE: Audio separation (Spleeter) has been removed as it requires Python 3.8.
+    This agent now only performs transcription using Whisper.
+    
+    For audio separation, use:
+    1. A separate Python 3.8 environment with Spleeter
+    2. Pre-separated audio files (vocals and instrumental)
     """
 
     def __init__(self):
@@ -519,16 +525,38 @@ class PreProcessAgent:
             print(f"  ✗ Error during transcription: {e}")
             raise
 
-    def process(self, song_path):
+    def process(self, song_path=None, vocals_path=None, instrumental_path=None):
         """
         Main processing pipeline
+        
+        Args:
+            song_path: Path to song file (if using audio separation - NOT SUPPORTED)
+            vocals_path: Path to pre-separated vocals file (required)
+            instrumental_path: Path to pre-separated instrumental file (required)
+        
+        Note: Audio separation is no longer supported. You must provide 
+              pre-separated vocals and instrumental files.
         """
         print("\n" + "=" * 60)
         print("STAGE 1: PRE-PROCESSING")
         print("=" * 60)
 
-        # Separate audio
-        vocals_path, instrumental_path = self.separate_audio(song_path)
+        # Check if pre-separated files are provided
+        if vocals_path and instrumental_path:
+            print("[Pre-Process Agent] Using pre-separated audio files...")
+            print(f"  → Vocals: {vocals_path}")
+            print(f"  → Instrumental: {instrumental_path}")
+        elif song_path:
+            # If only song_path is provided, try to call separate_audio
+            # This will raise NotImplementedError with helpful message
+            print("[Pre-Process Agent] Attempting audio separation...")
+            vocals_path, instrumental_path = self.separate_audio(song_path)
+        else:
+            raise ValueError(
+                "You must provide either:\n"
+                "1. Pre-separated vocals_path and instrumental_path, OR\n"
+                "2. A song_path (but audio separation is not available in Python 3.12)"
+            )
 
         # Transcribe lyrics
         lyrics_data = self.transcribe_lyrics(vocals_path)
@@ -960,22 +988,43 @@ class SongPipeline:
         self.mixer_agent = MixerAgent()
         self.artist_name = artist_name
 
-    def run(self, song_path, theme):
+    def run(self, song_path=None, theme=None, vocals_path=None, instrumental_path=None):
         """
         Run the full AI song transformation pipeline
+        
+        Args:
+            song_path: Path to song file (optional, for display purposes)
+            theme: Theme for lyric rewriting (required)
+            vocals_path: Path to pre-separated vocals file (required)
+            instrumental_path: Path to pre-separated instrumental file (required)
+        
+        Note: Audio separation is no longer supported. You must provide
+              pre-separated vocals and instrumental files.
         """
         print("\n" + "=" * 60)
         print("AI SONG PIPELINE")
         print("=" * 60)
-        print(f"Input song: {song_path}")
+        if song_path:
+            print(f"Input song: {song_path}")
+        if vocals_path:
+            print(f"Vocals: {vocals_path}")
+        if instrumental_path:
+            print(f"Instrumental: {instrumental_path}")
         print(f"Theme: {theme}")
         if self.artist_name:
             print(f"Artist voice style: {self.artist_name}")
         print("=" * 60)
 
+        if not theme:
+            raise ValueError("Theme is required for lyric rewriting")
+
         try:
-            # Stage 1: Pre-process (separation + transcription)
-            preprocess_result = self.preprocess_agent.process(song_path)
+            # Stage 1: Pre-process (transcription only, no separation)
+            preprocess_result = self.preprocess_agent.process(
+                song_path=song_path,
+                vocals_path=vocals_path,
+                instrumental_path=instrumental_path
+            )
 
             # Stage 2: Lyric Generation (rewrite to theme)
             new_lyrics_data = self.lyric_gen_agent.process(
@@ -997,7 +1046,12 @@ class SongPipeline:
             )
 
             # Stage 5: Mixing
-            song_name = Path(song_path).stem
+            if song_path:
+                song_name = Path(song_path).stem
+            elif vocals_path:
+                song_name = Path(vocals_path).stem.replace('_vocals', '').replace('-vocals', '')
+            else:
+                song_name = "output"
             output_name = f"{song_name}_themed_{theme.replace(' ', '_')}"
             final_output = self.mixer_agent.process(
                 aligned_vocals,
@@ -1039,12 +1093,18 @@ def main():
     load_dotenv()
 
     parser = argparse.ArgumentParser(
-        description="AI Song Pipeline - Transform songs with AI-generated themed lyrics",
+        description="AI Song Pipeline - Transform songs with AI-generated themed lyrics (Python 3.12+)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python pipeline.py --song input.mp3 --theme "space exploration" --artist "Drake"
-  python pipeline.py --song my_song.wav --theme "medieval fantasy" --artist "J. Cole"
+  # Using pre-separated audio files (recommended):
+  python pipeline.py --vocals vocals.wav --instrumental instrumental.wav --theme "space exploration"
+  
+  # With artist voice style:
+  python pipeline.py --vocals vocals.wav --instrumental instrumental.wav --theme "medieval fantasy" --artist "Drake"
+
+Note: Audio separation (Spleeter) is not available in Python 3.12.
+You must provide pre-separated vocals and instrumental files using --vocals and --instrumental.
 
 Environment Variables:
   GEMINI_API_KEY - Google Gemini API key (required for lyric generation and voice analysis)
@@ -1053,10 +1113,24 @@ Environment Variables:
     )
 
     parser.add_argument(
-        '--song',
+        '--vocals',
         type=str,
         required=True,
-        help='Path to the input song file (MP3, WAV, etc.)'
+        help='Path to pre-separated vocals file (WAV format recommended)'
+    )
+
+    parser.add_argument(
+        '--instrumental',
+        type=str,
+        required=True,
+        help='Path to pre-separated instrumental file (WAV format recommended)'
+    )
+
+    parser.add_argument(
+        '--song',
+        type=str,
+        default=None,
+        help='(Optional) Path to original song file for reference/display purposes'
     )
 
     parser.add_argument(
@@ -1089,10 +1163,18 @@ Environment Variables:
 
     args = parser.parse_args()
 
-    # Validate song file exists
-    if not os.path.exists(args.song):
-        print(f"Error: Song file not found: {args.song}")
+    # Validate required files exist
+    if not os.path.exists(args.vocals):
+        print(f"Error: Vocals file not found: {args.vocals}")
         sys.exit(1)
+    
+    if not os.path.exists(args.instrumental):
+        print(f"Error: Instrumental file not found: {args.instrumental}")
+        sys.exit(1)
+    
+    if args.song and not os.path.exists(args.song):
+        print(f"Warning: Song file not found: {args.song} (optional, ignoring)")
+        args.song = None
 
     # Create and run pipeline
     pipeline = SongPipeline(
@@ -1102,11 +1184,18 @@ Environment Variables:
     )
 
     try:
-        output_file = pipeline.run(args.song, args.theme)
+        output_file = pipeline.run(
+            song_path=args.song,
+            theme=args.theme,
+            vocals_path=args.vocals,
+            instrumental_path=args.instrumental
+        )
         print(f"\n✓ Success! Output saved to: {output_file}")
         return 0
     except Exception as e:
         print(f"\n✗ Pipeline failed: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 
