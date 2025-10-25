@@ -14,9 +14,37 @@ The pipeline consists of 5 specialized agents:
 
 ## Installation
 
+### Recommended Method (avoids building numpy from source)
+
+```bash
+# Upgrade pip, setuptools, and wheel first
+python -m pip install --upgrade pip setuptools wheel
+
+# Install numpy as a binary (avoids source builds on Windows)
+python -m pip install numpy --only-binary=:all:
+
+# Install the package in editable mode
+python -m pip install -e .
+```
+
+### Alternative Method (for Conda/Anaconda users on Windows)
+
+```bash
+# Create a conda environment with numpy pre-installed
+conda create -n hacknotts25 python=3.10 numpy
+conda activate hacknotts25
+
+# Install the package
+pip install -e .
+```
+
+### Legacy Method (using requirements.txt)
+
 ```bash
 pip install -r requirements.txt
 ```
+
+**Note**: The recommended method ensures numpy is installed as a pre-built binary wheel, which is significantly faster and avoids compilation issues on Windows.
 
 ## Usage
 

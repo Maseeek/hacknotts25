@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hacknotts25-pipeline"
+version = "0.1.0"
+description = "AI-powered song transformation pipeline"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+    "spleeter",
+    "openai-whisper",
+    "google-generativeai",
+    "librosa",
+    "fastdtw",
+    "pydub",
+    "numpy",
+    "scipy",
+]
+
+[project.scripts]
+pipeline = "pipeline:main"
