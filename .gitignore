@@ -29,7 +29,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
-
+.
 # Audio files
 *.wav
 *.mp3
@@ -53,3 +53,6 @@ pretrained_models/
 # OS
 .DS_Store
 Thumbs.db
+
+# Environment variables
+.env
