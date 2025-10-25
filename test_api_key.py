@@ -29,15 +29,18 @@ def test_env_loading():
         print("  Please update your .env file with a real API key")
         return False
     
+    # Store length for display (avoid accessing api_key in print statements)
+    key_length = len(api_key)
+    
     # Mask the API key for security (show only first and last 4 characters)
-    if len(api_key) > 8:
+    if key_length > 8:
         masked_key = f"{api_key[:4]}...{api_key[-4:]}"
     else:
         masked_key = "***"
     
     print(f"✓ SUCCESS: GEMINI_API_KEY loaded from .env file")
     print(f"  Key: {masked_key}")
-    print(f"  Length: {len(api_key)} characters")
+    print(f"  Length: {key_length} characters")
     return True
 
 
