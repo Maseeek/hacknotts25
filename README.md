@@ -7,7 +7,7 @@ An AI-powered song transformation pipeline that separates, transcribes, rewrites
 The pipeline consists of 5 specialized agents:
 
 1. **Pre-Process Agent**: Separates vocals from instrumental using Spleeter and transcribes lyrics with timing using Whisper
-2. **Lyric Generation Agent**: Rewrites lyrics to match a specified theme using OpenAI GPT
+2. **Lyric Generation Agent**: Rewrites lyrics to match a specified theme using Google Gemini
 3. **Voice Synthesis Agent**: Placeholder for future TTS/voice cloning implementation
 4. **Aligner Agent**: Placeholder for DTW-based audio alignment
 5. **Mixer Agent**: Overlays processed vocals on instrumental using pydub
@@ -36,7 +36,7 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
 
 ### Environment Variables
 
-- `OPENAI_API_KEY`: Required for lyric generation (Stage 2)
+- `GEMINI_API_KEY`: Required for lyric generation (Stage 2)
 
 ## Requirements
 
@@ -44,7 +44,7 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
 - Dependencies listed in `requirements.txt`:
   - spleeter (audio separation)
   - openai-whisper (speech-to-text)
-  - openai (lyric generation)
+  - google-generativeai (lyric generation with Gemini)
   - librosa (audio processing)
   - fastdtw (for future alignment)
   - pydub (audio mixing)
@@ -57,7 +57,7 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
 - Transcribes lyrics with word-level timestamps using Whisper
 
 ### Stage 2: Lyric Generation
-- Uses OpenAI GPT to rewrite lyrics matching the specified theme
+- Uses Google Gemini to rewrite lyrics matching the specified theme
 - Maintains structure and rhythm of original lyrics
 
 ### Stage 3: Voice Synthesis (Placeholder)

@@ -106,17 +106,17 @@ class PreProcessAgent:
 
 class LyricGenerationAgent:
     """
-    Lyric Generation Agent: Rewrites lyrics to match a theme using OpenAI
+    Lyric Generation Agent: Rewrites lyrics to match a theme using Google Gemini
     """
     
     def __init__(self, api_key=None):
-        self.api_key = api_key or os.environ.get('OPENAI_API_KEY')
+        self.api_key = api_key or os.environ.get('GEMINI_API_KEY')
         if not self.api_key:
-            print("  ⚠ Warning: No OpenAI API key found. Set OPENAI_API_KEY environment variable.")
+            print("  ⚠ Warning: No Gemini API key found. Set GEMINI_API_KEY environment variable.")
     
     def rewrite_lyrics(self, original_lyrics, theme):
         """
-        Rewrite lyrics to match the given theme using OpenAI
+        Rewrite lyrics to match the given theme using Google Gemini
         """
         print("\n" + "="*60)
         print("STAGE 2: LYRIC GENERATION")
@@ -128,9 +128,12 @@ class LyricGenerationAgent:
             return original_lyrics
         
         try:
-            from openai import OpenAI
+            import google.generativeai as genai
             
-            client = OpenAI(api_key=self.api_key)
+            genai.configure(api_key=self.api_key)
+            
+            # Create Gemini model
+            model = genai.GenerativeModel('gemini-pro')
             
             # Create prompt for lyric rewriting
             prompt = f"""You are a creative lyricist. Rewrite the following song lyrics to match the theme: "{theme}"
@@ -146,16 +149,9 @@ Requirements:
 
 Provide only the rewritten lyrics, no explanations."""
 
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a creative lyricist who rewrites songs to match themes."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8
-            )
+            response = model.generate_content(prompt)
             
-            new_lyrics = response.choices[0].message.content.strip()
+            new_lyrics = response.text.strip()
             
             print(f"  ✓ Generated new lyrics ({len(new_lyrics)} characters)")
             print(f"  ✓ Preview: {new_lyrics[:100]}...")
@@ -387,7 +383,7 @@ Examples:
   python pipeline.py --song my_song.wav --theme "medieval fantasy"
 
 Environment Variables:
-  OPENAI_API_KEY - OpenAI API key for lyric generation (required for full functionality)
+  GEMINI_API_KEY - Google Gemini API key for lyric generation (required for full functionality)
         """
     )
     
@@ -409,7 +405,7 @@ Environment Variables:
         '--api-key',
         type=str,
         default=None,
-        help='OpenAI API key (alternatively set OPENAI_API_KEY env var)'
+        help='Google Gemini API key (alternatively set GEMINI_API_KEY env var)'
     )
     
     args = parser.parse_args()
