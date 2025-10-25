@@ -40,7 +40,7 @@ python pipeline.py --song my_song.wav --theme "medieval fantasy"
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.7+ (currently running 3.8 due to issues with spleeter module on higher versions)
 - Dependencies listed in `requirements.txt`:
   - spleeter (audio separation)
   - openai-whisper (speech-to-text)
