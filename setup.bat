@@ -5,10 +5,10 @@ REM Creates a virtual environment and installs dependencies
 echo Setting up AI Song Pipeline...
 echo ================================
 
-REM Check if Python 3 is available
+REM Check if Python is available
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo Error: Python 3 is not installed or not in PATH
+    echo Error: Python is not installed or not in PATH
     exit /b 1
 )
 
@@ -47,7 +47,7 @@ if exist "venv\pyvenv.cfg" (
 
 REM Upgrade pip
 echo Upgrading pip...
-python -m pip install --upgrade pip
+pip install --upgrade pip
 
 REM Install dependencies
 echo Installing dependencies from requirements.txt...
@@ -62,7 +62,7 @@ echo To activate the virtual environment, run:
 echo   venv\Scripts\activate
 echo.
 echo To run the pipeline, use:
-echo   python pipeline.py --song ^<path_to_song^> --theme ^<theme^>
+echo   python pipeline.py --song <path_to_song> --theme <theme>
 echo.
 echo Don't forget to set your OpenAI API key:
 echo   set OPENAI_API_KEY=your-api-key-here
