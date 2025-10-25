@@ -14,9 +14,37 @@ The pipeline consists of 5 specialized agents:
 
 ## Installation
 
+### Quick Setup (Recommended)
+
+Run the automated setup script:
+
 ```bash
+./setup.sh
+```
+
+This script will:
+- Create a Python virtual environment in `./venv`
+- Generate the `pyvenv.cfg` file
+- Install all required dependencies from `requirements.txt`
+
+### Manual Setup
+
+If you prefer to set up manually:
+
+```bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate  # On Linux/Mac
+# or
+venv\Scripts\activate  # On Windows
+
+# Install dependencies
 pip install -r requirements.txt
 ```
+
+**Note**: The virtual environment folder (`venv/`) is gitignored and should not be committed to version control.
 
 ## Usage
 
