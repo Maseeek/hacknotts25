@@ -16,44 +16,112 @@ The pipeline consists of 5 specialized agents:
 
 > 📖 **For detailed setup instructions, see [SETUP.md](SETUP.md)**
 
-This project uses two Python environments to handle different dependency requirements:
+This project uses two Python environments to handle different dependency requirements.
 
-### Main Pipeline (Python 3.12+)
+### Prerequisites
 
-The main pipeline, lyric generation, voice synthesis, and mixing components run on Python 3.12 or higher.
+**All Platforms:**
+- Python 3.8 (for Spleeter service)
+- Python 3.12+ (for main pipeline)
+- Git
 
-1. **Create a virtual environment** (recommended):
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+**Windows Users:**
+- Download and install Python 3.8 from [python.org](https://www.python.org/downloads/release/python-3810/)
+- Download and install Python 3.12 from [python.org](https://www.python.org/downloads/)
+- Download FFmpeg from [ffmpeg.org](https://ffmpeg.org/download.html#build-windows) and add to PATH
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements-main.txt
-   ```
+---
 
-### Spleeter Service (Python 3.8)
+### Quick Setup
 
-Audio separation requires Python 3.8 due to Spleeter library compatibility. This runs as a separate microservice.
+<details>
+<summary><b>Windows</b></summary>
 
-1. **Navigate to the service directory**:
-   ```bash
-   cd spleeter_service
-   ```
+#### 1. Main Pipeline (Python 3.12+)
 
-2. **Run the setup script** (creates virtual environment and installs dependencies):
-   ```bash
-   ./start.sh
-   ```
+```powershell
+# Create virtual environment
+python -m venv venv
 
-   Or manually:
-   ```bash
-   python3.8 -m venv venv38
-   source venv38/bin/activate
-   pip install -r requirements.txt
-   python app.py
-   ```
+# Activate it
+venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements-main.txt
+```
+
+#### 2. Spleeter Service (Python 3.8)
+
+```powershell
+# Navigate to service directory
+cd spleeter_service
+
+# Create Python 3.8 virtual environment
+py -3.8 -m venv venv38
+
+# Activate it
+venv38\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Return to project root
+cd ..
+```
+
+#### 3. Configure API Keys
+
+Create a `.env` file in the project root:
+```
+GEMINI_API_KEY=your-actual-api-key-here
+ELEVENLABS_API_KEY=your-elevenlabs-api-key-here
+```
+
+</details>
+
+<details>
+<summary><b>Linux / macOS</b></summary>
+
+#### 1. Main Pipeline (Python 3.12+)
+
+```bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements-main.txt
+```
+
+#### 2. Spleeter Service (Python 3.8)
+
+```bash
+# Navigate to service directory
+cd spleeter_service
+
+# Run the automated setup script
+./start.sh
+```
+
+Or manually:
+```bash
+python3.8 -m venv venv38
+source venv38/bin/activate
+pip install -r requirements.txt
+cd ..
+```
+
+#### 3. Configure API Keys
+
+Create a `.env` file in the project root:
+```bash
+GEMINI_API_KEY=your-actual-api-key-here
+ELEVENLABS_API_KEY=your-elevenlabs-api-key-here
+```
+
+</details>
 
 See [`spleeter_service/README.md`](spleeter_service/README.md) for detailed setup instructions.
 
@@ -73,7 +141,15 @@ The pipeline requires a Google Gemini API key for lyric generation (Stage 2).
 
 To verify that your API key is properly configured, run the test script:
 
+**Windows:**
+```powershell
+venv\Scripts\activate
+python test_api_key.py
+```
+
+**Linux/macOS:**
 ```bash
+source venv/bin/activate
 python test_api_key.py
 ```
 
@@ -86,13 +162,75 @@ This will:
 
 To verify the Spleeter service is set up correctly:
 
+**Windows:**
+```powershell
+venv\Scripts\activate
+python test_spleeter_service.py
+```
+
+**Linux/macOS:**
 ```bash
+source venv/bin/activate
 python test_spleeter_service.py
 ```
 
 ## Usage
 
-### Option 1: Automatic (Recommended)
+### Running the Pipeline
+
+<details>
+<summary><b>Windows</b></summary>
+
+#### Option 1: All-in-One (Recommended for Testing)
+
+**Terminal 1 - Start Spleeter Service:**
+```powershell
+# Activate Spleeter environment
+cd spleeter_service
+venv38\Scripts\activate
+
+# Start the service
+python app.py
+```
+
+**Terminal 2 - Run Main Pipeline:**
+```powershell
+# Activate main environment
+venv\Scripts\activate
+
+# Run the pipeline
+python pipeline.py --song path\to\song.mp3 --theme "space exploration"
+```
+
+#### Option 2: Quick Test (if Spleeter service is already running)
+
+```powershell
+# Activate main environment
+venv\Scripts\activate
+
+# Test service is running
+python test_spleeter_service.py
+
+# Run pipeline
+python pipeline.py --song input.mp3 --theme "your theme"
+```
+
+#### Examples
+
+```powershell
+# Basic usage
+python pipeline.py --song input.mp3 --theme "space exploration"
+
+# With artist voice style
+python pipeline.py --song my_song.wav --theme "medieval fantasy" --artist "Drake"
+```
+
+</details>
+
+<details>
+<summary><b>Linux / macOS</b></summary>
+
+#### Option 1: Automatic (Recommended)
 
 Use the convenience script that manages both services:
 
@@ -105,32 +243,32 @@ This script will:
 - Run the main pipeline
 - Keep the Spleeter service running for subsequent uses
 
-### Option 2: Manual Control
+#### Option 2: Manual Control
 
-**Terminal 1 - Start Spleeter Service (Python 3.8):**
+**Terminal 1 - Start Spleeter Service:**
 ```bash
 cd spleeter_service
 ./start.sh
 ```
 
-**Terminal 2 - Run Main Pipeline (Python 3.12+):**
+**Terminal 2 - Run Main Pipeline:**
 ```bash
-source venv/bin/activate  # If using virtual environment
+source venv/bin/activate
 python pipeline.py --song <path_to_song> --theme <theme>
 ```
 
-### Examples
+#### Examples
 
 ```bash
-# Using the convenience script (recommended)
+# Using the convenience script
 ./run_pipeline.sh --song input.mp3 --theme "space exploration"
 ./run_pipeline.sh --song my_song.wav --theme "medieval fantasy" --artist "Drake"
 
 # Or manually if services are already running
 python pipeline.py --song input.mp3 --theme "space exploration"
-python pipeline.py --song my_song.wav --theme "medieval fantasy"
-python pipeline.py --song input.mp3 --theme "space exploration" --artist "Drake"
 ```
+
+</details>
 
 ### Environment Variables
 
