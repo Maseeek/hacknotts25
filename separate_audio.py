@@ -1,34 +1,40 @@
+from flask import Flask, request, jsonify
 from pathlib import Path
+from spleeter.separator import Separator
+import tempfile
+import os
+
+app = Flask(__name__)
+
 @app.route('/split', methods=['POST'])
-def separate_audio(self, song_path):
-        """
-        Separate vocals and instrumental using Spleeter
-        Returns paths to separated files
-        """
-        print("[Pre-Process Agent] Separating vocals and instrumental...")
+def split_audio():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
 
-        try:
-            from spleeter.separator import Separator
+        file = request.files['file']
+        tmp_dir = tempfile.mkdtemp()
+        song_path = os.path.join(tmp_dir, file.filename)
+        file.save(song_path)
 
-            # Use 2stems model (vocals and accompaniment)
-            separator = Separator('spleeter:2stems')
+        output_dir = Path("output/separated")
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Separate the audio
-            song_name = Path(song_path).stem
-            output_path = self.output_dir / "separated" / song_name
+        separator = Separator('spleeter:2stems')
+        separator.separate_to_file(song_path, str(output_dir))
 
-            separator.separate_to_file(song_path, str(self.output_dir / "separated"))
+        song_name = Path(file.filename).stem
+        vocals_path = str(output_dir / song_name / "vocals.wav")
+        instrumental_path = str(output_dir / song_name / "accompaniment.wav")
 
-            vocals_path = output_path / "vocals.wav"
-            instrumental_path = output_path / "instrumental.wav"
+        return jsonify({
+            "vocals_path": vocals_path,
+            "instrumental_path": instrumental_path
+        })
 
-            print(f"  ✓ Vocals saved to: {vocals_path}")
-            print(f"  ✓ Instrumental saved to: {instrumental_path}")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-            return str(vocals_path), str(instrumental_path)
 
-        except Exception as e:
-            print(f"  ✗ Error during separation: {e}")
-            raise
 if __name__ == '__main__':
-    app.run(port=5001)
+    app.run(port=5001, debug=True)

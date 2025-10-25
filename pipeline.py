@@ -461,99 +461,45 @@ load_dotenv()
 
 class PreProcessAgent:
     """
-    Pre-process Agent: Separates vocals from instrumental and extracts lyrics with timing
-    Uses Spleeter for separation and Whisper for transcription
+    Handles audio preprocessing — communicates with the Spleeter Flask microservice
+    to separate vocals and instrumentals.
     """
 
-    def __init__(self):
+    def __init__(self, spleeter_service_url="http://127.0.0.1:5001/split"):
+        self.spleeter_service_url = spleeter_service_url
         self.output_dir = Path("output")
         self.output_dir.mkdir(exist_ok=True)
 
     def separate_audio(self, song_path):
         """
-        Separate vocals from instrumental using Spleeter
+        Sends a POST request to the Flask Spleeter service to split the song.
+        Returns paths to the generated vocals and instrumental files.
         """
-        print("[Pre-Process Agent] Separating vocals and instrumental...")
+        print("[Pre-Process Agent] Requesting audio separation from Spleeter service...")
 
         try:
-            from spleeter.separator import Separator
+            with open(song_path, 'rb') as f:
+                files = {'file': (Path(song_path).name, f, 'audio/mpeg')}
+                response = requests.post(self.spleeter_service_url, files=files)
 
-            # Initialize Spleeter with 2 stems (vocals + accompaniment)
-            separator = Separator('spleeter:2stems')
+            if response.status_code != 200:
+                raise Exception(f"Spleeter service error {response.status_code}: {response.text}")
 
-            # Create output directory
-            song_name = Path(song_path).stem
-            output_path = self.output_dir / "separated" / song_name
-            output_path.mkdir(parents=True, exist_ok=True)
+            data = response.json()
+            vocals_path = data.get("vocals_path")
+            instrumental_path = data.get("instrumental_path")
 
-            # Separate audio
-            separator.separate_to_file(song_path, str(self.output_dir / "separated"))
-
-            # Get paths to separated files
-            vocals_path = output_path / "vocals.wav"
-            instrumental_path = output_path / "accompaniment.wav"
+            if not vocals_path or not instrumental_path:
+                raise Exception("Spleeter service returned incomplete response")
 
             print(f"  ✓ Vocals saved to: {vocals_path}")
             print(f"  ✓ Instrumental saved to: {instrumental_path}")
 
-            return str(vocals_path), str(instrumental_path)
+            return vocals_path, instrumental_path
 
         except Exception as e:
-            print(f"  ✗ Error during separation: {e}")
+            print(f"  ✗ Error contacting Spleeter service: {e}")
             raise
-
-    def transcribe_lyrics(self, vocals_path):
-        """
-        Transcribe lyrics and timing using Whisper
-        Returns lyrics with word-level timestamps
-        """
-        print("[Pre-Process Agent] Transcribing lyrics with timing...")
-
-        try:
-            import whisper
-
-            # Load Whisper model (using base model for balance of speed/accuracy)
-            model = whisper.load_model("base")
-
-            # Transcribe with word-level timestamps
-            result = model.transcribe(vocals_path, word_timestamps=True)
-
-            # Extract lyrics and timing information
-            lyrics_data = {
-                'text': result['text'],
-                'segments': result['segments'],
-                'language': result['language']
-            }
-
-            print(f"  ✓ Transcribed {len(result['segments'])} segments")
-            print(f"  ✓ Language: {result['language']}")
-            print(f"  ✓ Full text: {result['text'][:100]}...")
-
-            return lyrics_data
-
-        except Exception as e:
-            print(f"  ✗ Error during transcription: {e}")
-            raise
-
-    def process(self, song_path):
-        """
-        Main processing pipeline
-        """
-        print("\n" + "=" * 60)
-        print("STAGE 1: PRE-PROCESSING")
-        print("=" * 60)
-
-        # Separate audio
-        vocals_path, instrumental_path = self.separate_audio(song_path)
-
-        # Transcribe lyrics
-        lyrics_data = self.transcribe_lyrics(vocals_path)
-        
-        return {
-            'vocals_path': vocals_path,
-            'instrumental_path': instrumental_path,
-            'lyrics_data': lyrics_data
-        }
 
 
 class LyricGenerationAgent:
@@ -642,228 +588,193 @@ Provide only the rewritten lyrics, no explanations."""
 class VoiceSynthAgent:
     """
     Voice Synthesis Agent: Uses Gemini to analyze artist vocal characteristics
-    and intelligently select the best ElevenLabs voice for synthesis
+    and intelligently select the best ElevenLabs voice for synthesis.
     """
 
     def __init__(self, gemini_api_key=None, elevenlabs_api_key=None):
-        # Setup Gemini API
-        self.gemini_api_key = gemini_api_key or os.environ.get('GEMINI_API_KEY')
-        self.elevenlabs_api_key = elevenlabs_api_key or os.environ.get('ELEVENLABS_API_KEY')
-        
+        # Setup API keys
+        self.gemini_api_key = gemini_api_key or os.environ.get("GEMINI_API_KEY")
+        self.elevenlabs_api_key = elevenlabs_api_key or os.environ.get("ELEVENLABS_API_KEY")
+
         if not self.gemini_api_key:
             print("  ⚠ Warning: No Gemini API key found for voice analysis.")
-        
+
         if not self.elevenlabs_api_key:
             print("  ⚠ Warning: No ElevenLabs API key found for voice synthesis.")
-        
-        # Initialize Gemini if available
+
+        # Initialize Gemini (Gemini 2.5)
         if self.gemini_api_key:
             try:
-                import google.generativeai as genai
                 genai.configure(api_key=self.gemini_api_key)
-                self.gemini_model = genai.GenerativeModel('gemini-pro')
+                self.gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+                print("  ✓ Gemini initialized")
             except Exception as e:
-                print(f"  ⚠ Could not initialize Gemini: {e}")
+                print(f"  ✗ Could not initialize Gemini: {e}")
                 self.gemini_model = None
         else:
             self.gemini_model = None
-        
-        # Initialize ElevenLabs if available
+
+        # Initialize ElevenLabs client
         if self.elevenlabs_api_key:
             try:
-                from elevenlabs import set_api_key
-                set_api_key(self.elevenlabs_api_key)
+                self.elevenlabs_client = ElevenLabs(api_key=self.elevenlabs_api_key)
+                print("  ✓ ElevenLabs initialized")
             except Exception as e:
-                print(f"  ⚠ Could not initialize ElevenLabs: {e}")
+                print(f"  ✗ Could not initialize ElevenLabs: {e}")
+                self.elevenlabs_client = None
+        else:
+            self.elevenlabs_client = None
 
+    # --------------------------------------------------
+    # 1️⃣ Get artist voice description via Gemini
+    # --------------------------------------------------
     def get_voice_description(self, artist_name):
-        """
-        Use Gemini to generate a detailed voice description based on artist name
-        """
         if not self.gemini_model:
             return f"Voice similar to {artist_name}"
-        
-        print(f"[Voice Synth Agent] Analyzing vocal characteristics of {artist_name}...")
-        
-        prompt = f"""Describe the vocal characteristics of {artist_name} in detail for voice synthesis purposes. Include:
 
-1. Voice type (tenor, baritone, bass, etc.)
-2. Tone quality (warm, raspy, smooth, breathy, crisp, etc.)
-3. Vocal range and register
-4. Distinctive vocal techniques or styles
-5. Emotional delivery style (laid-back, aggressive, melodic, etc.)
-6. Any unique vocal quirks or characteristics
-7. Typical vocal effects (reverb, autotune level, etc.)
+        print(f"\n[Voice Synth Agent] Analyzing vocal characteristics of {artist_name}...")
 
-Keep it concise but technical enough for voice synthesis. Format as a single detailed paragraph."""
+        prompt = f"""
+        Describe the vocal characteristics of {artist_name} in detail for voice synthesis purposes.
+        DO NOT repeat the artist's name. Include:
+
+        1. Voice type (tenor, baritone, bass, etc.)
+        2. Tone quality (warm, raspy, smooth, breathy, crisp, etc.)
+        3. Vocal range and register
+        4. Distinctive vocal techniques or styles
+        5. Emotional delivery style (laid-back, aggressive, melodic, etc.)
+        6. Unique vocal quirks or characteristics
+        7. Typical vocal effects (reverb, autotune level, etc.)
+
+        Keep it concise but technical enough for AI voice synthesis.
+        """
 
         try:
             response = self.gemini_model.generate_content(prompt)
             description = response.text.strip()
-            print(f"  ✓ Voice description generated")
+            print(f"  ✓ Voice description generated\n{description}\n")
             return description
         except Exception as e:
             print(f"  ✗ Error generating voice description: {e}")
             return f"Voice similar to {artist_name}, expressive and clear"
 
+    # --------------------------------------------------
+    # 2️⃣ Get ElevenLabs voice list
+    # --------------------------------------------------
     def get_available_voices(self):
-        """
-        Get list of available ElevenLabs voices
-        """
+        if not self.elevenlabs_client:
+            return []
         try:
-            from elevenlabs import voices
-            available_voices = voices()
-            return available_voices
+            response = self.elevenlabs_client.voices.get_all()
+            return response.voices
         except Exception as e:
             print(f"  ✗ Error fetching voices: {e}")
             return []
 
+    # --------------------------------------------------
+    # 3️⃣ Match best ElevenLabs voice via Gemini
+    # --------------------------------------------------
     def get_best_voice_match(self, voice_description, artist_name):
-        """
-        Use Gemini to intelligently select the best ElevenLabs voice based on description
-        """
         if not self.gemini_model:
-            return "Adam"
-        
+            return "pNInz6obpgDQGcFmaJgB"  # Default Adam voice ID
+
         print(f"[Voice Synth Agent] Selecting best voice match for {artist_name}...")
-        
-        # Get available voices
+
         available_voices = self.get_available_voices()
-        
         if not available_voices:
-            print("  ⚠ No voices available, using default 'Adam'")
-            return "Adam"
-        
-        # Format voice list for Gemini
-        voice_list = []
-        for v in available_voices:
-            voice_info = f"- {v.name}"
-            if hasattr(v, 'labels') and v.labels:
-                labels = ', '.join([f"{k}: {val}" for k, val in v.labels.items()])
-                voice_info += f" ({labels})"
-            if hasattr(v, 'description') and v.description:
-                voice_info += f" - {v.description}"
-            voice_list.append(voice_info)
-        
-        prompt = f"""You are a voice matching expert. Given this vocal description for {artist_name}:
+            print("  ⚠ No voices available, using default.")
+            return "pNInz6obpgDQGcFmaJgB"
 
-{voice_description}
+        voice_list = [
+            f"- {v.name} (ID: {v.voice_id})"
+            + (f" - {v.description}" if getattr(v, "description", None) else "")
+            for v in available_voices
+        ]
 
-Which of these ElevenLabs voices would be the BEST match? Consider:
-- Voice type and gender
-- Tone quality and character
-- Age and maturity
-- Accent and style
-- Overall similarity to the artist
+        prompt = f"""
+        Given the following vocal description for {artist_name}:
 
-Available voices:
-{chr(10).join(voice_list)}
+        {voice_description}
 
-Return ONLY the exact voice name (e.g., "Adam" or "Rachel"), nothing else. No explanations."""
+        Which of these ElevenLabs voices would best match?
+        Consider tone, range, style, and emotional delivery.
+
+        Available voices:
+        {chr(10).join(voice_list)}
+
+        Return ONLY the exact voice name (e.g., "Adam" or "Rachel"), no explanation.
+        """
 
         try:
             response = self.gemini_model.generate_content(prompt)
             voice_name = response.text.strip().replace('"', '').replace("'", '')
-            
-            # Verify the voice exists
-            voice_names = [v.name for v in available_voices]
-            if voice_name in voice_names:
-                print(f"  ✓ Selected voice: {voice_name}")
-                return voice_name
-            else:
-                print(f"  ⚠ Voice '{voice_name}' not found, using 'Adam'")
-                return "Adam"
-                
+
+            for v in available_voices:
+                if v.name.lower() == voice_name.lower():
+                    print(f"  ✓ Selected voice: {v.name} (ID: {v.voice_id})")
+                    return v.voice_id
+
+            print(f"  ⚠ Voice '{voice_name}' not found, using default.")
+            return "pNInz6obpgDQGcFmaJgB"
+
         except Exception as e:
             print(f"  ✗ Error selecting voice: {e}")
-            return "Adam"
+            return "pNInz6obpgDQGcFmaJgB"
 
-    def synthesize_voice(self, lyrics, reference_vocals_path, artist_name=None, voice_description=None):
-        """
-        Synthesize new vocals from lyrics using AI-selected voice
-        """
+    # --------------------------------------------------
+    # 4️⃣ Generate vocals with ElevenLabs
+    # --------------------------------------------------
+    def synthesize_voice(self, lyrics, artist_name=None):
         print("\n" + "=" * 60)
         print("STAGE 3: VOICE SYNTHESIS")
         print("=" * 60)
-        
-        # Check if we have the necessary API keys
-        if not self.elevenlabs_api_key:
-            print("[Voice Synth Agent] Voice synthesis not available (no ElevenLabs API key)")
-            print("  ⚠ Returning original vocals path")
-            return reference_vocals_path
-        
-        # Get voice description from Gemini if artist name provided
-        if artist_name and not voice_description:
+
+        if not self.elevenlabs_client:
+            print("  ✗ ElevenLabs not initialized")
+            return None
+
+        if artist_name:
             voice_description = self.get_voice_description(artist_name)
-            print(f"\n[Voice Profile for {artist_name}]")
-            print(f"{voice_description}\n")
-        elif voice_description:
-            print(f"\n[Voice Profile]")
-            print(f"{voice_description}\n")
+            selected_voice_id = self.get_best_voice_match(voice_description, artist_name)
         else:
-            voice_description = "Clear, expressive male voice"
-            print(f"\n[Voice Profile] Using default couldn't generate new description: {voice_description}\n")
-        
-        # Use Gemini to intelligently select the best voice
-        if artist_name and self.gemini_model:
-            selected_voice = self.get_best_voice_match(voice_description, artist_name)
-        else:
-            selected_voice = "Adam"
-            print(f"[Voice Synth Agent] Using default voice: {selected_voice}")
-        
-        # Generate vocals with AI-selected voice
-        print(f"[Voice Synth Agent] Generating vocals with {selected_voice}...")
-        
+            selected_voice_id = "pNInz6obpgDQGcFmaJgB"
+            print("  → Using default voice")
+
+        print(f"  → Generating vocals with ID: {selected_voice_id}")
+
         try:
-            from elevenlabs import generate
-            
-            audio = generate(
+            audio_stream = self.elevenlabs_client.generate(
                 text=lyrics,
-                voice=selected_voice,
-                model="eleven_multilingual_v2"
+                voice=selected_voice_id,
+                model="eleven_multilingual_v2",
             )
-            
-            # Save the audio
+
             output_dir = Path("output")
             output_dir.mkdir(exist_ok=True)
-            output_path = output_dir / "new_vocals_raw.wav"
-            
-            with open(output_path, "wb") as f:
-                f.write(audio)
-            
-            print(f"  ✓ Vocals generated successfully")
-            print(f"  ✓ Saved to: {output_path}")
-            return str(output_path)
-            
-        except Exception as e:
-            print(f"  ✗ Error during voice synthesis: {e}")
-            print(f"  → Returning original vocals path")
-            return reference_vocals_path
+            output_path = output_dir / "synthesized_vocals.mp3"
 
-    def process(self, lyrics_data, vocals_path, artist_name=None):
+            audio_bytes = b"".join(audio_stream)
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes)
+
+            print(f"  ✓ Vocals generated and saved to: {output_path}")
+            return str(output_path)
+
+        except Exception as e:
+            print(f"  ✗ Error during synthesis: {e}")
+            return None
+
+
+    def process(self, lyrics_data, vocals_path=None, artist_name=None):
         """
-        Main processing for voice synthesis
-        
-        Args:
-            lyrics_data: Dictionary containing lyrics (e.g., {'rewritten': '...', 'original': ...})
-            vocals_path: Path to reference vocals
-            artist_name: Name of artist to match voice style (optional)
-            
-        Returns:
-            Path to synthesized vocals file
+        Called by main pipeline.
         """
-        # Extract lyrics from data
         if isinstance(lyrics_data, dict):
-            # Use rewritten lyrics if available, otherwise original
-            lyrics = lyrics_data.get('rewritten', lyrics_data.get('original', {}).get('text', ''))
+            lyrics = lyrics_data.get("rewritten") or lyrics_data.get("original", {}).get("text", "")
         else:
             lyrics = str(lyrics_data)
-        
-        return self.synthesize_voice(
-            lyrics=lyrics,
-            reference_vocals_path=vocals_path,
-            artist_name=artist_name
-        )
+
+        return self.synthesize_voice(lyrics, artist_name)
 
 
 class AlignerAgent:
