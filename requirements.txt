@@ -1,6 +1,6 @@
 spleeter
 openai-whisper
-google-generativeai
+google-generativeai>=0.3.0
 librosa
 fastdtw
 pydub
