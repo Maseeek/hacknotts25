@@ -153,6 +153,162 @@ class LyricGenerationAgent:
 # =====================================================
 import os
 from pathlib import Path
+# import requests
+
+# url = "https://api.sunoapi.org/api/v1/generate/add-vocals"
+
+# payload = {
+#     "prompt": "A calm and relaxing piano track with soothing vocals",
+#     "title": "Relaxing Piano with Vocals",
+#     "negativeTags": "Heavy Metal, Aggressive Vocals",
+#     "style": "Jazz",
+#     "vocalGender": "m",
+#     "styleWeight": 0.61,
+#     "weirdnessConstraint": 0.72,
+#     "audioWeight": 0.65,
+#     "uploadUrl": "https://example.com/instrumental.mp3",
+#     "callBackUrl": "https://api.example.com/callback",
+#     "model": "V4_5PLUS"
+# }
+# headers = {
+#     "Authorization": "Bearer <token>",
+#     "Content-Type": "application/json"
+# }
+
+# response = requests.post(url, json=payload, headers=headers)
+
+# print(response.json())
+
+class MusicGen:
+    """
+    Music gen using suno ai
+    """
+
+    def __init__(self, api_key=None, suno_api_key=None):
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        self.suno_api_key = suno_api_key or os.environ.get("SUNO_API_KEY")
+        if not self.suno_api_key:
+            print("No suno API Key found")
+        if not self.api_key:
+            print("⚠ No Gemini API key found. Set GEMINI_API_KEY in your .env file.")
+
+    def create_song_details(self, lyrics, songName, artistName):
+        print("\n" + "=" * 60)
+        print("STAGE X: MUSIC GENERATION")
+        print("=" * 60)
+        print(f"[MUSIC GEN AGENT] Generating description for '{songName}' by {artistName}...")
+
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=self.api_key)
+            model = genai.GenerativeModel("gemini-2.5-flash")
+
+            prompt = f"""
+    You are a world-class music producer, sound designer, and creative director with a deep understanding of tone, mood, and style.
+
+    Given the **artist name** and **song title**, generate a **cinematic and emotionally detailed description** of the track’s sound — without naming the artist or song directly.  
+    The goal is to brief an AI music system that will recreate and remix the track with new lyrics.
+
+    Your output must be vivid and technically descriptive, as if explaining the song to a producer who will rebuild it from scratch.
+
+    ---
+
+    ### TASKS
+
+    1. **Describe the sound and feeling**
+    - Explain the **musical atmosphere** (tempo, rhythm, instrumentation, production style)
+    - Capture the **emotional tone** and **vocal style** (delivery, expression, energy)
+    - Provide **cultural or temporal context** (era, influences, location)
+    - Summarize the **story or message** the music conveys
+
+    2. **Generate metadata**
+    - "title": A suitable remix title inspired by the original song
+    - "style": The musical style or genre (e.g., "Jazz", "Hip-Hop", "R&B", "Pop", "Electronic")
+    - "negativeTags": Musical directions or styles to AVOID (e.g., "Heavy Metal, Rock, Country")
+    - "vocalGender":  
+        - "m" for male voice  
+        - "f" for female voice  
+        Infer this naturally from the artist’s name or typical vocal range if known.
+
+    3. **Append new lyrics**
+    After the song description, include:
+    “Now perform the remix with these new lyrics, keeping the same emotional and sonic energy:”  
+    Then insert the lyrics below exactly as provided.
+
+    ---
+
+    ### INPUT
+    Artist: {artistName}  
+    Song: {songName}  
+    Lyrics: {lyrics}
+
+    ---
+
+    ### OUTPUT FORMAT
+    Return your final result strictly as valid **JSON**, using this structure:
+
+    {{
+    "description": "<a vivid paragraph describing the song’s sound, tone, and mood>",
+    "title": "<a fitting remix title>",
+    "negativeTags": "<comma-separated list of unwanted genres or traits>",
+    "style": "<musical style or genre>",
+    "vocalGender": "<m or f>"
+    }}
+    """
+
+            # Generate response
+            response = model.generate_content(prompt)
+            raw_output = response.text.strip() if response and hasattr(response, "text") else None
+
+            if not raw_output:
+                raise ValueError("Empty response from Gemini")
+
+            import json
+            try:
+                description_data = json.loads(raw_output)
+            except json.JSONDecodeError:
+                print("  ⚠️ Model returned non-JSON output. Using raw text instead.")
+                description_data = {"description": raw_output}
+
+            # Debug print
+            print(f"  ✓ New description generated:\n{description_data.get('description', raw_output)}\n")
+
+            # Build structured output (with fallbacks)
+            return {
+                "description": description_data.get("description", raw_output),
+                "title": description_data.get("title", f"{songName} (Remix)"),
+                "negativeTags": description_data.get("negativeTags", "Heavy Metal, Rock, Country"),
+                "style": description_data.get("style", "Contemporary Soul"),
+                "vocalGender": description_data.get("vocalGender", "m"),
+                "artist": artistName,
+                "song name": songName
+            }
+
+        except Exception as e:
+            print(f"  ✗ Error during description generation: {e}")
+
+            # Default fallback output if generation or parsing fails
+            default_description = (
+                f"An emotionally rich, rhythm-driven track blending soulful melodies with modern production. "
+                f"It carries an introspective yet powerful energy — balancing vulnerability and ambition. "
+                f"The vocals are expressive and dynamic, layered over atmospheric synths and punchy percussion, "
+                f"capturing the sound of an artist striving for meaning, growth, and connection through music.\n\n"
+                f"Now perform the remix with these new lyrics, keeping the same emotional and sonic energy:\n{lyrics}"
+            )
+
+            return {
+                "description": default_description,
+                "title": f"{songName} (Remix)",
+                "negativeTags": "Heavy Metal, Rock, Country",
+                "style": "Contemporary Soul",
+                "vocalGender": "m",
+                "artist": artistName,
+                "song name": songName
+            }
+    # def song_creation(lyrics, songName, artistName, instruMental):
+
+
+
 
 class VoiceSynthAgent:
     """
