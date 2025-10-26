@@ -470,12 +470,93 @@ class VoiceSynthAgent:
 # =====================================================
 # 4️⃣ ALIGNER AGENT
 # =====================================================
+import librosa
+import soundfile as sf
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
+import numpy as np
+from pydub import AudioSegment
+import json
+import os
+import matplotlib.pyplot as plt
+
+
 class AlignerAgent:
-    def process(self, vocals_path, timing_data):
+    def process(self, vocals_path, timing_data_path):
         print("\n" + "=" * 60)
-        print("STAGE 4: ALIGNMENT (Placeholder)")
+        print("STAGE 4: ALIGNMENT (Vocals → Timing Map)")
         print("=" * 60)
-        return vocals_path
+
+        try:
+            # -------------------------------------------------------
+            # 4.1 LOAD TIMING MAP
+            # -------------------------------------------------------
+            if not os.path.exists(timing_data_path):
+                raise FileNotFoundError(f"Missing timing data: {timing_data_path}")
+
+            with open(timing_data_path, "r") as f:
+                timing_data = json.load(f)
+
+            print(f"✓ Timing map loaded: {timing_data_path}")
+
+            # -------------------------------------------------------
+            # 4.2 LOAD AI VOCALS AND ALIGN USING DTW
+            # -------------------------------------------------------
+            y_vocals, sr_vocals = librosa.load(vocals_path, sr=None)
+            print(f"✓ Loaded vocals: {vocals_path} ({len(y_vocals)} samples, {sr_vocals} Hz)")
+
+            # Extract the target rhythm reference (e.g., beat times)
+            ref_timing = np.array(timing_data.get("beat_times", []))
+            if len(ref_timing) == 0:
+                raise ValueError("No 'beat_times' key found in timing data.")
+
+            # Extract onset envelope from AI vocals
+            onset_env = librosa.onset.onset_strength(y=y_vocals, sr=sr_vocals)
+            tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr_vocals)
+            vocal_times = librosa.frames_to_time(beat_frames, sr=sr_vocals)
+
+            # Use DTW to match AI vocal beats to reference timing
+            distance, path = fastdtw(vocal_times, ref_timing, dist=euclidean)
+            print(f"✓ DTW alignment completed (distance={distance:.2f})")
+
+            # Stretch AI vocals to fit target rhythm
+            stretch_ratio = len(ref_timing) / len(vocal_times)
+            aligned_audio = librosa.effects.time_stretch(y_vocals, rate=stretch_ratio)
+
+            aligned_output = "data/output/aligned_vocals.wav"
+            os.makedirs(os.path.dirname(aligned_output), exist_ok=True)
+            sf.write(aligned_output, aligned_audio, sr_vocals)
+            print(f"✓ Aligned vocals saved: {aligned_output}")
+
+            # -------------------------------------------------------
+            # 4.3 VISUAL SYNC TEST
+            # -------------------------------------------------------
+            plt.figure(figsize=(10, 4))
+            librosa.display.waveshow(aligned_audio, sr=sr_vocals, alpha=0.6)
+            plt.title("Aligned Vocals Waveform")
+            plt.xlabel("Time (s)")
+            plt.ylabel("Amplitude")
+            plt.show()
+
+            # -------------------------------------------------------
+            # 4.4 FINAL ADJUSTMENT (OPTIONAL)
+            # -------------------------------------------------------
+            final_output = "data/output/final_vocals.wav"
+            aligned_segment = AudioSegment.from_wav(aligned_output)
+
+            # Optionally stretch or adjust pitch slightly
+            final_segment = aligned_segment  # placeholder for extra tuning
+            final_segment.export(final_output, format="wav")
+            print(f"✓ Final vocals saved: {final_output}")
+
+            # -------------------------------------------------------
+            # ✅ RETURN OUTPUT
+            # -------------------------------------------------------
+            return final_output
+
+        except Exception as e:
+            print(f"✗ Error in alignment stage: {e}")
+            return vocals_path
 
 
 # =====================================================
