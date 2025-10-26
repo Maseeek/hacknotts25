@@ -82,7 +82,7 @@ class PreProcessAgent:
                 "language": result.get("language", "unknown"),
             }
 
-            print(f"  ✓ Transcribed {len(lyrics_data['segments'])} segments")
+            print(f"  ✓ Transcribed {len(lyrics_data['segments'])} segments {lyrics_data['segments'][:6]}")
             print(f"  ✓ Language: {lyrics_data['language']}")
             print(f"  ✓ Sample text: {lyrics_data['text'][:100]}...")
             return lyrics_data
@@ -316,256 +316,373 @@ class MusicGen:
             }
     # def song_creation(lyrics, songName, artistName, instruMental):
 
-
-
+import os
 
 class VoiceSynthAgent:
-    """
-    Voice Synthesis Agent:
-    - Uses Gemini to analyze artist's voice style.
-    - Selects a matching ElevenLabs voice.
-    - Synthesizes vocals using rewritten lyrics.
-    """
+    def __init__(self, api_key=None):
+        self.api_key = api_key
 
-    def __init__(self, gemini_api_key=None, elevenlabs_api_key=None):
-        import google.generativeai as genai
-        from elevenlabs.client import ElevenLabs  # ✅ correct import
-
-        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
-        self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
-
-        # Initialize Gemini (optional)
-        self.gemini_model = None
-        if self.gemini_api_key:
-            try:
-                genai.configure(api_key=self.gemini_api_key)
-                self.gemini_model = genai.GenerativeModel("gemini-2.0-flash")
-                print("  ✓ Gemini initialized for voice analysis.")
-            except Exception as e:
-                print(f"  ✗ Gemini initialization failed: {e}")
-
-        # Initialize ElevenLabs
-        self.eleven_client = None
-        try:
-            self.eleven_client = ElevenLabs(api_key=self.elevenlabs_api_key)
-            print("  ✓ ElevenLabs initialized for TTS.")
-        except Exception as e:
-            print(f"  ✗ ElevenLabs init error: {e}")
-
-    # =============================================================
-    # VOICE SELECTION STAGE
-    # =============================================================
-
-    def analyze_voice(self, artist_name: str) -> str:
-        """
-        Use Gemini to describe artist's voice (tone, timbre, range).
-        """
-        if not self.gemini_model:
-            return f"A voice similar to {artist_name}"
-
-        prompt = f"Describe {artist_name}'s vocal tone, timbre, and range in detail."
-        try:
-            resp = self.gemini_model.generate_content(prompt)
-            return resp.text.strip()
-        except Exception:
-            return f"A voice similar to {artist_name}"
-
-    def pick_best_voice(self, voice_description: str) -> str:
-        """
-        Use Gemini to select the most fitting ElevenLabs voice.
-        """
-        if not self.gemini_model or not self.eleven_client:
-            return "pNInz6obpgDQGcFmaJgB"  # Default Adam
-
-        try:
-            voices = self.eleven_client.voices.get_all().voices
-            voice_list = "\n".join(
-                [f"- {v.name}: {getattr(v, 'description', 'No description')}" for v in voices]
-            )
-
-            prompt = f"""
-            Based on this voice description:
-            {voice_description}
-
-            Choose the best matching ElevenLabs voice from:
-            {voice_list}
-
-            Return only the voice name.
-            """
-
-            resp = self.gemini_model.generate_content(prompt)
-            match_name = resp.text.strip().lower()
-
-            for v in voices:
-                if v.name.lower() == match_name:
-                    print(f"  ✓ Voice selected: {v.name}")
-                    return v.voice_id
-
-            print("  ⚠ No exact match found, using default voice.")
-            return "pNInz6obpgDQGcFmaJgB"
-
-        except Exception as e:
-            print(f"  ✗ Voice match error: {e}")
-            return "pNInz6obpgDQGcFmaJgB"
-
-    # =============================================================
-    # SYNTHESIS STAGE
-    # =============================================================
-
-    def synthesize_voice(self, lyrics: str, artist_name: str = None) -> str | None:
-        """
-        Generate vocals from lyrics using the best ElevenLabs voice.
-        """
+    def process(self, lyrics, description):
         print("\n" + "=" * 60)
-        print("VOICE SYNTHESIS")
+        print("STAGE 3: VOICE SYNTHESIS")
         print("=" * 60)
 
-        if not self.eleven_client:
-            print("  ✗ ElevenLabs client not initialized — cannot synthesize voice.")
-            return None
+        # Path to local test vocals
+        local_voice_path = "test_vocals.mp3"
 
-        # Analyze & pick voice
-        if artist_name:
-            description = self.analyze_voice(artist_name)
-            voice_id = self.pick_best_voice(description)
-        else:
-            voice_id = "pNInz6obpgDQGcFmaJgB"  # Default
-            print("  ⚙ Using default ElevenLabs voice.")
+        # ✅ If test_vocals.mp3 already exists, reuse it
+        if os.path.exists(local_voice_path):
+            print(f"  🎤 Using existing local vocal file: {local_voice_path}")
+            return local_voice_path
 
-        # Generate audio
-        print(f"  🎤 Generating vocals using voice ID: {voice_id}")
+        # Otherwise, use ElevenLabs (or your AI voice system)
+        print("  🧠 No local file found — generating new AI vocals...")
 
         try:
-            audio_generator = self.eleven_client.text_to_speech.convert(
-                voice_id=voice_id,
-                model_id="eleven_multilingual_v2",
-                text=lyrics,
-                output_format="mp3_44100_128"
-            )
+            import requests
+            url = "https://api.elevenlabs.io/v1/speech/generate"
+            headers = {"xi-api-key": self.api_key}
+            payload = {
+                "text": lyrics,
+                "voice": "Josh",  # example voice
+                "model_id": "eleven_multilingual_v2"
+            }
 
-            output_dir = Path("output")
-            output_dir.mkdir(exist_ok=True)
-            output_path = output_dir / "generated_vocals.mp3"
+            response = requests.post(url, json=payload, headers=headers)
 
-            audio_bytes = b"".join(audio_generator)
-            with open(output_path, "wb") as f:
-                f.write(audio_bytes)
-
-            print(f"  ✓ Vocals successfully saved to {output_path}")
-            return str(output_path)
+            if response.status_code == 200:
+                with open(local_voice_path, "wb") as f:
+                    f.write(response.content)
+                print(f"  ✓ New vocals saved to {local_voice_path}")
+                return local_voice_path
+            else:
+                raise Exception(f"Voice generation failed: {response.text}")
 
         except Exception as e:
-            print(f"  ✗ Voice synthesis failed: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"  ✗ Error during voice synthesis: {e}")
             return None
 
-    # =============================================================
-    # PIPELINE INTERFACE
-    # =============================================================
 
-    def process(self, lyrics_data: dict, artist_name: str = None):
-        """
-        Pipeline entrypoint — expects `lyrics_data` from previous stage.
-        """
-        lyrics = (
-            lyrics_data.get("rewritten")
-            if isinstance(lyrics_data, dict)
-            else str(lyrics_data)
-        )
 
-        return self.synthesize_voice(lyrics, artist_name or "Unknown Artist")
+# class VoiceSynthAgent:
+#     """
+#     Voice Synthesis Agent:
+#     - Uses Gemini to analyze artist's voice style.
+#     - Selects a matching ElevenLabs voice.
+#     - Synthesizes vocals using rewritten lyrics.
+#     """
+
+#     def __init__(self, gemini_api_key=None, elevenlabs_api_key=None):
+#         import google.generativeai as genai
+#         from elevenlabs.client import ElevenLabs  # ✅ correct import
+
+#         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+#         self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
+
+#         # Initialize Gemini (optional)
+#         self.gemini_model = None
+#         if self.gemini_api_key:
+#             try:
+#                 genai.configure(api_key=self.gemini_api_key)
+#                 self.gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+#                 print("  ✓ Gemini initialized for voice analysis.")
+#             except Exception as e:
+#                 print(f"  ✗ Gemini initialization failed: {e}")
+
+#         # Initialize ElevenLabs
+#         self.eleven_client = None
+#         try:
+#             self.eleven_client = ElevenLabs(api_key=self.elevenlabs_api_key)
+#             print("  ✓ ElevenLabs initialized for TTS.")
+#         except Exception as e:
+#             print(f"  ✗ ElevenLabs init error: {e}")
+
+#     # =============================================================
+#     # VOICE SELECTION STAGE
+#     # =============================================================
+
+#     def analyze_voice(self, artist_name: str) -> str:
+#         """
+#         Use Gemini to describe artist's voice (tone, timbre, range).
+#         """
+#         if not self.gemini_model:
+#             return f"A voice similar to {artist_name}"
+
+#         prompt = f"Describe {artist_name}'s vocal tone, timbre, and range in detail."
+#         try:
+#             resp = self.gemini_model.generate_content(prompt)
+#             return resp.text.strip()
+#         except Exception:
+#             return f"A voice similar to {artist_name}"
+
+#     def pick_best_voice(self, voice_description: str) -> str:
+#         """
+#         Use Gemini to select the most fitting ElevenLabs voice.
+#         """
+#         if not self.gemini_model or not self.eleven_client:
+#             return "pNInz6obpgDQGcFmaJgB"  # Default Adam
+
+#         try:
+#             voices = self.eleven_client.voices.get_all().voices
+#             voice_list = "\n".join(
+#                 [f"- {v.name}: {getattr(v, 'description', 'No description')}" for v in voices]
+#             )
+
+#             prompt = f"""
+#             Based on this voice description:
+#             {voice_description}
+
+#             Choose the best matching ElevenLabs voice from:
+#             {voice_list}
+
+#             Return only the voice name.
+#             """
+
+#             resp = self.gemini_model.generate_content(prompt)
+#             match_name = resp.text.strip().lower()
+
+#             for v in voices:
+#                 if v.name.lower() == match_name:
+#                     print(f"  ✓ Voice selected: {v.name}")
+#                     return v.voice_id
+
+#             print("  ⚠ No exact match found, using default voice.")
+#             return "pNInz6obpgDQGcFmaJgB"
+
+#         except Exception as e:
+#             print(f"  ✗ Voice match error: {e}")
+#             return "pNInz6obpgDQGcFmaJgB"
+
+#     # =============================================================
+#     # SYNTHESIS STAGE
+#     # =============================================================
+
+#     def synthesize_voice(self, lyrics: str, artist_name: str = None) -> str | None:
+#         """
+#         Generate vocals from lyrics using the best ElevenLabs voice.
+#         """
+#         print("\n" + "=" * 60)
+#         print("VOICE SYNTHESIS")
+#         print("=" * 60)
+
+#         if not self.eleven_client:
+#             print("  ✗ ElevenLabs client not initialized — cannot synthesize voice.")
+#             return None
+
+#         # Analyze & pick voice
+#         if artist_name:
+#             description = self.analyze_voice(artist_name)
+#             voice_id = self.pick_best_voice(description)
+#         else:
+#             voice_id = "pNInz6obpgDQGcFmaJgB"  # Default
+#             print("  ⚙ Using default ElevenLabs voice.")
+
+#         # Generate audio
+#         print(f"  🎤 Generating vocals using voice ID: {voice_id}")
+
+#         try:
+#             audio_generator = self.eleven_client.text_to_speech.convert(
+#                 voice_id=voice_id,
+#                 model_id="eleven_multilingual_v2",
+#                 text=lyrics,
+#                 output_format="mp3_44100_128"
+#             )
+
+#             output_dir = Path("output")
+#             output_dir.mkdir(exist_ok=True)
+#             output_path = output_dir / "generated_vocals.mp3"
+
+#             audio_bytes = b"".join(audio_generator)
+#             with open(output_path, "wb") as f:
+#                 f.write(audio_bytes)
+
+#             print(f"  ✓ Vocals successfully saved to {output_path}")
+#             return str(output_path)
+
+#         except Exception as e:
+#             print(f"  ✗ Voice synthesis failed: {e}")
+#             import traceback
+#             traceback.print_exc()
+#             return None
+
+#     # =============================================================
+#     # PIPELINE INTERFACE
+#     # =============================================================
+
+#     def process(self, lyrics_data: dict, artist_name: str = None):
+#         """
+#         Pipeline entrypoint — expects `lyrics_data` from previous stage.
+#         """
+#         lyrics = (
+#             lyrics_data.get("rewritten")
+#             if isinstance(lyrics_data, dict)
+#             else str(lyrics_data)
+#         )
+
+#         return self.synthesize_voice(lyrics, artist_name or "Unknown Artist")
 
 # =====================================================
 # 4️⃣ ALIGNER AGENT
 # =====================================================
 
+class AlignerAgent:
+    def __init__(self):
+        pass
+
+    # -------------------------------------------------------
+    # 4.1 SANITIZATION AND LOADING UTILITIES
+    # -------------------------------------------------------
+    def _sanitize_timing_map(self, timing_data):
+        """Ensure timing_data has a clean list of numerical beat times."""
+        if isinstance(timing_data, dict):
+            # Case 1: already clean
+            if "beat_times" in timing_data and isinstance(timing_data["beat_times"], list):
+                return np.array(
+                    [float(t) for t in timing_data["beat_times"] if isinstance(t, (int, float))],
+                    dtype=float,
+                )
+
+            # Case 2: Whisper-style structure with segments + words
+            elif "segments" in timing_data:
+                beat_times = []
+                for seg in timing_data["segments"]:
+                    for w in seg.get("words", []):
+                        start = w.get("start")
+                        if isinstance(start, (int, float)):
+                            beat_times.append(float(start))
+                print(f"✓ Extracted {len(beat_times)} beat times from segments.")
+                return np.array(beat_times, dtype=float)
+
+        elif isinstance(timing_data, list):
+            return np.array([float(t) for t in timing_data if isinstance(t, (int, float))], dtype=float)
+
+        raise ValueError("No valid 'beat_times' or segments found in timing data.")
+
+    def _load_timing_map(self, timing_data):
+        """Load and validate timing data from dict or file path."""
+        if isinstance(timing_data, str):
+            if not os.path.exists(timing_data):
+                raise FileNotFoundError(f"Missing timing data file: {timing_data}")
+            with open(timing_data, "r") as f:
+                timing_data = json.load(f)
+            print(f"✓ Timing map loaded from file.")
+        elif isinstance(timing_data, dict):
+            print("✓ Timing map loaded directly from dictionary.")
+        else:
+            raise ValueError("timing_data must be a dict or a valid file path.")
+        return self._sanitize_timing_map(timing_data)
+
+    def _load_vocals(self, path):
+        """Load vocals and ensure mono."""
+        y, sr = librosa.load(path, sr=None, mono=True)
+        print(f"✓ Loaded vocals: {path} ({len(y)} samples, {sr} Hz)")
+        return y, sr
+
+    # -------------------------------------------------------
+    # 4.2 ALIGNMENT PROCESS
+    # -------------------------------------------------------
+
+# =====================================================
+# 4️⃣ ALIGNER AGENT - SIMPLIFIED (NO TIME STRETCHING)
+# =====================================================
 
 class AlignerAgent:
-    def process(self, vocals_path, timing_data_path):
+    def __init__(self):
+        pass
+
+    def _load_vocals(self, path):
+        """Load vocals and ensure mono."""
+        y, sr = librosa.load(path, sr=None, mono=True)
+        duration = len(y) / sr
+        print(f"✓ Loaded vocals: {path}")
+        print(f"  - Duration: {duration:.2f} seconds")
+        print(f"  - Sample rate: {sr} Hz")
+        return y, sr
+
+    def process(self, vocals_path, timing_data):
         print("\n" + "=" * 60)
-        print("STAGE 4: ALIGNMENT (Vocals → Timing Map)")
+        print("STAGE 4: ALIGNMENT (Simple Duration Matching)")
         print("=" * 60)
 
         try:
-            # -------------------------------------------------------
-            # 4.1 LOAD TIMING MAP
-            # -------------------------------------------------------
-            if not os.path.exists(timing_data_path):
-                raise FileNotFoundError(f"Missing timing data: {timing_data_path}")
+            # Load the new AI vocals
+            y_vocals, sr_vocals = self._load_vocals(vocals_path)
+            
+            # Get the original song duration from timing data
+            if isinstance(timing_data, dict) and "segments" in timing_data:
+                original_duration = 0
+                for seg in timing_data["segments"]:
+                    seg_end = seg.get("end", 0)
+                    if seg_end > original_duration:
+                        original_duration = seg_end
+                print(f"✓ Original song duration: {original_duration:.2f} seconds")
+            else:
+                print("⚠️  Could not determine original duration")
+                original_duration = len(y_vocals) / sr_vocals
 
-            with open(timing_data_path, "r") as f:
-                timing_data = json.load(f)
+            current_duration = len(y_vocals) / sr_vocals
+            target_samples = int(original_duration * sr_vocals)
+            current_samples = len(y_vocals)
 
-            print(f"✓ Timing map loaded: {timing_data_path}")
+            print(f"✓ Current vocal samples: {current_samples} ({current_duration:.2f}s)")
+            print(f"✓ Target samples needed: {target_samples} ({original_duration:.2f}s)")
 
-            # -------------------------------------------------------
-            # 4.2 LOAD AI VOCALS AND ALIGN USING DTW
-            # -------------------------------------------------------
-            y_vocals, sr_vocals = librosa.load(vocals_path, sr=None)
-            print(f"✓ Loaded vocals: {vocals_path} ({len(y_vocals)} samples, {sr_vocals} Hz)")
+            # Simple approach: repeat or trim to match length
+            if current_samples < target_samples:
+                # Need to extend - loop the vocals
+                repeats_needed = int(np.ceil(target_samples / current_samples))
+                print(f"  ⚙️  Looping vocals {repeats_needed} times to fill duration...")
+                aligned_audio = np.tile(y_vocals, repeats_needed)[:target_samples]
+            else:
+                # Need to shorten - just trim
+                print(f"  ⚙️  Trimming vocals to match duration...")
+                aligned_audio = y_vocals[:target_samples]
 
-            # Extract the target rhythm reference (e.g., beat times)
-            ref_timing = np.array(timing_data.get("beat_times", []))
-            if len(ref_timing) == 0:
-                raise ValueError("No 'beat_times' key found in timing data.")
+            # Verify final duration
+            final_duration = len(aligned_audio) / sr_vocals
+            print(f"✓ Final duration: {final_duration:.2f} seconds")
 
-            # Extract onset envelope from AI vocals
-            onset_env = librosa.onset.onset_strength(y=y_vocals, sr=sr_vocals)
-            tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr_vocals)
-            vocal_times = librosa.frames_to_time(beat_frames, sr=sr_vocals)
-
-            # Use DTW to match AI vocal beats to reference timing
-            distance, path = fastdtw(vocal_times, ref_timing, dist=euclidean)
-            print(f"✓ DTW alignment completed (distance={distance:.2f})")
-
-            # Stretch AI vocals to fit target rhythm
-            stretch_ratio = len(ref_timing) / len(vocal_times)
-            aligned_audio = librosa.effects.time_stretch(y_vocals, rate=stretch_ratio)
-
+            # Save aligned output
+            os.makedirs("data/output", exist_ok=True)
             aligned_output = "data/output/aligned_vocals.wav"
-            os.makedirs(os.path.dirname(aligned_output), exist_ok=True)
             sf.write(aligned_output, aligned_audio, sr_vocals)
             print(f"✓ Aligned vocals saved: {aligned_output}")
 
-            # -------------------------------------------------------
-            # 4.3 VISUAL SYNC TEST
-            # -------------------------------------------------------
-            plt.figure(figsize=(10, 4))
-            librosa.display.waveshow(aligned_audio, sr=sr_vocals, alpha=0.6)
-            plt.title("Aligned Vocals Waveform")
-            plt.xlabel("Time (s)")
-            plt.ylabel("Amplitude")
-            plt.show()
-
-            # -------------------------------------------------------
-            # 4.4 FINAL ADJUSTMENT (OPTIONAL)
-            # -------------------------------------------------------
+            # Export final version
             final_output = "data/output/final_vocals.wav"
             aligned_segment = AudioSegment.from_wav(aligned_output)
+            aligned_segment.export(final_output, format="wav")
+            print(f"✓ Final vocals exported: {final_output}")
 
-            # Optionally stretch or adjust pitch slightly
-            final_segment = aligned_segment  # placeholder for extra tuning
-            final_segment.export(final_output, format="wav")
-            print(f"✓ Final vocals saved: {final_output}")
-
-            # -------------------------------------------------------
-            # ✅ RETURN OUTPUT
-            # -------------------------------------------------------
             return final_output
 
         except Exception as e:
             print(f"✗ Error in alignment stage: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"⚠️  Falling back to original vocals: {vocals_path}")
             return vocals_path
 
 
+
+
 # =====================================================
-# 5️⃣ MIXER AGENT
+# 5️⃣ MIXER AGENT - ENHANCED VERSION
 # =====================================================
+
 class MixerAgent:
-    def __init__(self):
+    def __init__(self, vocal_boost_db=2, instrumental_reduce_db=-3):
+        """
+        Initialize the mixer with volume adjustments.
+        
+        Args:
+            vocal_boost_db: How much to boost vocals (in decibels). Default +2dB
+            instrumental_reduce_db: How much to reduce instrumental (in decibels). Default -3dB
+        """
         self.output_dir = Path("output")
         self.output_dir.mkdir(exist_ok=True)
+        self.vocal_boost_db = vocal_boost_db
+        self.instrumental_reduce_db = instrumental_reduce_db
 
     def process(self, vocals_path, instrumental_path, output_name="final_mix"):
         print("\n" + "=" * 60)
@@ -573,20 +690,108 @@ class MixerAgent:
         print("=" * 60)
 
         from pydub import AudioSegment
+        from pydub.effects import normalize, compress_dynamic_range
 
-        vocals = AudioSegment.from_file(vocals_path)
-        instrumental = AudioSegment.from_file(instrumental_path)
+        try:
+            # Load audio files
+            print(f"  📂 Loading vocals from: {vocals_path}")
+            vocals = AudioSegment.from_file(vocals_path)
+            
+            print(f"  📂 Loading instrumental from: {instrumental_path}")
+            instrumental = AudioSegment.from_file(instrumental_path)
 
-        if len(vocals) > len(instrumental):
-            vocals = vocals[:len(instrumental)]
-        else:
-            instrumental = instrumental[:len(vocals)]
+            # Display original properties
+            print(f"  📊 Vocals: {len(vocals)}ms, {vocals.frame_rate}Hz, {vocals.channels} channel(s)")
+            print(f"  📊 Instrumental: {len(instrumental)}ms, {instrumental.frame_rate}Hz, {instrumental.channels} channel(s)")
 
-        mixed = instrumental.overlay(vocals)
-        output_path = self.output_dir / f"{output_name}.wav"
-        mixed.export(output_path, format="wav")
-        print(f"  ✓ Final mix saved to: {output_path}")
-        return str(output_path)
+            # Match sample rates if different
+            if vocals.frame_rate != instrumental.frame_rate:
+                print(f"  ⚙️  Resampling vocals to match instrumental ({instrumental.frame_rate}Hz)")
+                vocals = vocals.set_frame_rate(instrumental.frame_rate)
+
+            # Match channels (convert to stereo if needed)
+            if vocals.channels == 1 and instrumental.channels == 2:
+                print("  ⚙️  Converting vocals to stereo")
+                vocals = vocals.set_channels(2)
+            elif vocals.channels == 2 and instrumental.channels == 1:
+                print("  ⚙️  Converting instrumental to stereo")
+                instrumental = instrumental.set_channels(2)
+
+            # Trim or pad to match lengths
+            target_length = min(len(vocals), len(instrumental))
+            
+            if len(vocals) > target_length:
+                print(f"  ✂️  Trimming vocals from {len(vocals)}ms to {target_length}ms")
+                vocals = vocals[:target_length]
+            elif len(vocals) < target_length:
+                print(f"  ⏱️  Padding vocals from {len(vocals)}ms to {target_length}ms")
+                silence = AudioSegment.silent(duration=target_length - len(vocals))
+                vocals = vocals + silence
+
+            if len(instrumental) > target_length:
+                print(f"  ✂️  Trimming instrumental from {len(instrumental)}ms to {target_length}ms")
+                instrumental = instrumental[:target_length]
+
+            # Apply volume adjustments
+            print(f"  🔊 Boosting vocals by {self.vocal_boost_db}dB")
+            vocals = vocals + self.vocal_boost_db
+            
+            print(f"  🔉 Reducing instrumental by {abs(self.instrumental_reduce_db)}dB")
+            instrumental = instrumental + self.instrumental_reduce_db
+
+            # Apply light compression to vocals for consistency
+            print("  🎛️  Applying dynamic range compression to vocals")
+            vocals = compress_dynamic_range(vocals, threshold=-20.0, ratio=3.0, attack=5.0, release=50.0)
+
+            # Mix the tracks
+            print("  🎵 Mixing vocals with instrumental...")
+            mixed = instrumental.overlay(vocals, position=0)
+
+            # Normalize the final mix to prevent clipping
+            print("  📈 Normalizing final mix...")
+            mixed = normalize(mixed, headroom=0.1)
+
+            # Export final mix
+            output_path = self.output_dir / f"{output_name}.wav"
+            print(f"  💾 Exporting to: {output_path}")
+            mixed.export(output_path, format="wav", parameters=["-ar", "44100", "-ac", "2"])
+            
+            # Also create an MP3 version
+            mp3_output = self.output_dir / f"{output_name}.mp3"
+            print(f"  💾 Also exporting MP3 to: {mp3_output}")
+            mixed.export(mp3_output, format="mp3", bitrate="320k")
+
+            print(f"  ✅ Final mix saved successfully!")
+            print(f"     - WAV: {output_path}")
+            print(f"     - MP3: {mp3_output}")
+            print(f"     - Duration: {len(mixed) / 1000:.2f} seconds")
+            
+            return str(output_path)
+
+        except Exception as e:
+            print(f"  ❌ Error during mixing: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Fallback: try basic mixing without enhancements
+            print("  ⚠️  Attempting basic mix as fallback...")
+            try:
+                vocals = AudioSegment.from_file(vocals_path)
+                instrumental = AudioSegment.from_file(instrumental_path)
+                
+                if len(vocals) > len(instrumental):
+                    vocals = vocals[:len(instrumental)]
+                else:
+                    instrumental = instrumental[:len(vocals)]
+                
+                mixed = instrumental.overlay(vocals)
+                output_path = self.output_dir / f"{output_name}_basic.wav"
+                mixed.export(output_path, format="wav")
+                print(f"  ✓ Basic mix saved to: {output_path}")
+                return str(output_path)
+            except Exception as fallback_error:
+                print(f"  ❌ Fallback mixing also failed: {fallback_error}")
+                return None
 
 
 import os
@@ -799,6 +1004,7 @@ if __name__ == "__main__":
 # =====================================================
 class SongPipeline:
     def __init__(self, gemini_api_key=None):
+        
         self.preprocess_agent = PreProcessAgent()
         self.lyric_gen_agent = LyricGenerationAgent(api_key=gemini_api_key)
         self.voice_synth_agent = VoiceSynthAgent(gemini_api_key)
@@ -816,9 +1022,10 @@ class SongPipeline:
         lyrics_data = preprocess["lyrics_data"]
 
         rewritten = self.lyric_gen_agent.process(lyrics_data, theme)
-        synth_vocals = self.voice_synth_agent.process(rewritten, artist_name=artist_name)
+        synth_vocals = self.voice_synth_agent.process(rewritten, description="")
         aligned = self.aligner_agent.process(synth_vocals, lyrics_data)
-        final = self.mixer_agent.process(preprocess["vocals_path"], preprocess["instrumental_path"], f"{Path(song_path).stem}_remix")
+        final = self.mixer_agent.process(aligned, preprocess["instrumental_path"], f"{Path(song_path).stem}_remix")
+
         
 
         print("\n✓ PIPELINE COMPLETE.")
