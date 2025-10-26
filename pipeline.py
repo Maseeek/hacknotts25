@@ -794,7 +794,6 @@ if __name__ == "__main__":
         )
     else:
         print("Please set the SUNO_API_KEY environment variable to run the example.")
-
 # =====================================================
 # MAIN PIPELINE
 # =====================================================
