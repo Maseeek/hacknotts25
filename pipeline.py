@@ -7,6 +7,8 @@ import argparse
 import os
 import sys
 import requests
+import base64  # NEW: For Base64 file upload
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 import whisper
@@ -17,7 +19,7 @@ load_dotenv()
 
 
 # =====================================================
-# 1️⃣ PRE-PROCESS AGENT
+# 1️⃣ PRE-PROCESS AGENT (FIXED: Added robust Spleeter error handling)
 # =====================================================
 class PreProcessAgent:
     """
@@ -34,28 +36,44 @@ class PreProcessAgent:
     def separate_audio(self, song_path):
         print("[Pre-Process Agent] Requesting audio separation from Spleeter service...")
 
-        try:
-            with open(song_path, "rb") as f:
-                files = {"file": (Path(song_path).name, f, "audio/mpeg")}
-                response = requests.post(self.spleeter_service_url, files=files)
+        retries = 3
+        delay = 5
 
-            if response.status_code != 200:
-                raise Exception(f"Spleeter service error {response.status_code}: {response.text}")
+        for attempt in range(retries):
+            try:
+                with open(song_path, "rb") as f:
+                    files = {"file": (Path(song_path).name, f, "audio/mpeg")}
 
-            data = response.json()
-            vocals_path = data.get("vocals_path")
-            instrumental_path = data.get("instrumental_path")
+                    print(f"  ⚙ Attempting Spleeter split (Attempt {attempt + 1}/{retries})...")
+                    response = requests.post(self.spleeter_service_url, files=files, timeout=600)  # Added timeout
 
-            if not vocals_path or not instrumental_path:
-                raise Exception("Spleeter service returned incomplete response")
+                if response.status_code != 200:
+                    raise Exception(f"Spleeter service error {response.status_code}: {response.text}")
 
-            print(f"  ✓ Vocals saved to: {vocals_path}")
-            print(f"  ✓ Instrumental saved to: {instrumental_path}")
-            return vocals_path, instrumental_path
+                data = response.json()
+                vocals_path = data.get("vocals_path")
+                instrumental_path = data.get("instrumental_path")
 
-        except Exception as e:
-            print(f"  ✗ Error contacting Spleeter service: {e}")
-            raise
+                if not vocals_path or not instrumental_path:
+                    raise Exception("Spleeter service returned incomplete response")
+
+                print(f"  ✓ Vocals saved to: {vocals_path}")
+                print(f"  ✓ Instrumental saved to: {instrumental_path}")
+                return vocals_path, instrumental_path
+
+            except requests.exceptions.RequestException as e:
+                # Catch network errors (like ConnectionResetError 10054)
+                print(f"  ✗ Network error contacting Spleeter (Attempt {attempt + 1}): {e}")
+                if attempt < retries - 1:
+                    print(f"  Waiting {delay}s before retry...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    raise  # Re-raise the exception after all retries fail
+            except Exception as e:
+                # Catch Spleeter service errors (like 500)
+                print(f"  ✗ Error contacting Spleeter service: {e}")
+                raise
 
     def transcribe_lyrics(self, vocals_path):
         """
@@ -69,10 +87,13 @@ class PreProcessAgent:
             result = model.transcribe(vocals_path, word_timestamps=True)
 
             lyrics_data = {
-                "text": result["text"],
+                "text": result["text"].strip(),  # Strip whitespace from text
                 "segments": result.get("segments", []),
                 "language": result.get("language", "unknown"),
             }
+
+            # Check if transcription failed to extract meaningful text
+            is_empty = not lyrics_data['text'] or lyrics_data['text'].startswith("...") or lyrics_data['text'] == " "
 
             print(f"  ✓ Transcribed {len(lyrics_data['segments'])} segments")
             print(f"  ✓ Language: {lyrics_data['language']}")
@@ -81,7 +102,8 @@ class PreProcessAgent:
 
         except Exception as e:
             print(f"  ✗ Whisper transcription failed: {e}")
-            raise
+            # Return empty data structure so the pipeline can proceed
+            return {"text": "", "segments": [], "language": "en"}
 
     def process(self, song_path):
         """
@@ -102,7 +124,7 @@ class PreProcessAgent:
 
 
 # =====================================================
-# 2️⃣ LYRIC GENERATION AGENT
+# 2️⃣ LYRIC GENERATION AGENT (FIXED: Added logic for empty/instrumental tracks)
 # =====================================================
 class LyricGenerationAgent:
     """
@@ -114,263 +136,93 @@ class LyricGenerationAgent:
         if not self.api_key:
             print("⚠ No Gemini API key found. Set GEMINI_API_KEY in your .env file.")
 
-    def rewrite_lyrics(self, original_lyrics, theme):
-        print("\n" + "=" * 60)
-        print("STAGE 2: LYRIC GENERATION")
-        print("=" * 60)
-        print(f"[Lyric Gen Agent] Rewriting lyrics with theme: {theme}")
-
+        # Initialize Gemini once
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel("gemini-2.5-flash")  # Updated model
-
-            prompt = f"""
-            Rewrite the following song lyrics to fit the theme: "{theme}"
-            Maintain the rhythm, syllable count, rhyme scheme and flow.
-
-            Original:
-            {original_lyrics['text']}
-            """
-
-            response = model.generate_content(prompt)
-            rewritten = response.text.strip() if response and hasattr(response, "text") else None
-
-            if not rewritten:
-                raise ValueError("Empty response from Gemini")
-
-            print(f"  ✓ New lyrics generated.")
-            print(f"  ✓ Sample: {rewritten[:100]}...")
-            return {"original": original_lyrics, "rewritten": rewritten, "theme": theme}
-
+            self.model = genai.GenerativeModel("gemini-2.5-flash")
+            print("  ✓ Gemini model initialized (gemini-2.5-flash).")
         except Exception as e:
-            print(f"  ✗ Error during lyric generation: {e}")
-            return {"original": original_lyrics, "rewritten": original_lyrics['text'], "theme": theme}
+            self.model = None
+            print(f"  ✗ Gemini initialization failed: {e}")
 
-    def process(self, lyrics_data, theme):
-        return self.rewrite_lyrics(lyrics_data, theme)
+    def _call_gemini(self, prompt):
+        """Helper for calling Gemini."""
+        if not self.model:
+            raise Exception("Gemini model not available.")
 
+        response = self.model.generate_content(prompt)
+        return response.text.strip() if response and hasattr(response, "text") else None
 
-# =====================================================
-# 3️⃣ VOICE SYNTHESIS AGENT (COMMENTED OUT - REPLACED BY SUNO)
-# =====================================================
-# import os
-# from pathlib import Path
+    def rewrite_lyrics(self, original_text, theme):
+        """Rewrites existing lyrics."""
+        prompt = f"""
+        Rewrite the following song lyrics to fit the theme: "{theme}"
+        Maintain the rhythm, syllable count, rhyme scheme and flow.
 
-# class VoiceSynthAgent:
-#     """
-#     Voice Synthesis Agent:
-#     - Uses Gemini to analyze artist's voice style.
-#     - Selects a matching ElevenLabs voice.
-#     - Synthesizes vocals using rewritten lyrics.
-#     """
+        Original Lyrics:
+        {original_text}
+        """
+        return self._call_gemini(prompt)
 
-#     def __init__(self, gemini_api_key=None, elevenlabs_api_key=None):
-#         import google.generativeai as genai
-#         from elevenlabs.client import ElevenLabs  # ✅ correct import
+    def generate_new_lyrics(self, theme, artist="Unknown Artist"):
+        """Generates new lyrics from scratch."""
+        prompt = f"""
+        Write new song lyrics (Verse, Chorus, Verse, Chorus) about the theme of "{theme}".
+        The style should be a tribute to the artist {artist}, if possible.
+        The lyrics should be clean and fit a standard popular song structure.
+        """
+        return self._call_gemini(prompt)
 
-#         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
-#         self.elevenlabs_api_key = elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY")
+    def process(self, lyrics_data, theme, artist_name="Unknown Artist"):
+        print("\n" + "=" * 60)
+        print("STAGE 2: LYRIC GENERATION")
+        print("=" * 60)
 
-#         # Initialize Gemini (optional)
-#         self.gemini_model = None
-#         if self.gemini_api_key:
-#             try:
-#                 genai.configure(api_key=self.gemini_api_key)
-#                 self.gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-#                 print("  ✓ Gemini initialized for voice analysis.")
-#             except Exception as e:
-#                 print(f"  ✗ Gemini initialization failed: {e}")
+        original_text = lyrics_data.get("text", "").strip()
+        rewritten = ""
 
-#         # Initialize ElevenLabs
-#         self.eleven_client = None
-#         try:
-#             self.eleven_client = ElevenLabs(api_key=self.elevenlabs_api_key)
-#             print("  ✓ ElevenLabs initialized for TTS.")
-#         except Exception as e:
-#             print(f"  ✗ ElevenLabs init error: {e}")
+        # Determine if we should rewrite or generate new
+        if not original_text or len(original_text) < 5:
+            print(f"[Lyric Gen Agent] Original lyrics are empty/minimal. Generating new lyrics for theme: {theme}")
 
-#     # =============================================================
-#     # VOICE SELECTION STAGE
-#     # =============================================================
+            try:
+                rewritten = self.generate_new_lyrics(theme, artist_name)
+                print("  ✓ New lyrics generated.")
+            except Exception as e:
+                print(f"  ✗ Error during new lyric generation: {e}")
 
-#     def analyze_voice(self, artist_name: str) -> str:
-#         """
-#         Use Gemini to describe artist's voice (tone, timbre, range).
-#         """
-#         if not self.gemini_model:
-#             return f"A voice similar to {artist_name}"
+        else:
+            print(f"[Lyric Gen Agent] Rewriting lyrics with theme: {theme}")
 
-#         prompt = f"Describe {artist_name}'s vocal tone, timbre, and range in detail."
-#         try:
-#             resp = self.gemini_model.generate_content(prompt)
-#             return resp.text.strip()
-#         except Exception:
-#             return f"A voice similar to {artist_name}"
+            try:
+                rewritten = self.rewrite_lyrics(original_text, theme)
+                print("  ✓ Rewritten lyrics generated.")
+            except Exception as e:
+                print(f"  ✗ Error during lyric rewrite: {e}")
 
-#     def pick_best_voice(self, voice_description: str) -> str:
-#         """
-#         Use Gemini to select the most fitting ElevenLabs voice.
-#         """
-#         if not self.gemini_model or not self.eleven_client:
-#             return "pNInz6obpgDQGcFmaJgB"  # Default Adam
+        if not rewritten or len(rewritten) < 5:
+            print("❌ Halting pipeline: Lyrics are empty after generation.")
+            # Critical error: stop the pipeline by raising an exception
+            raise Exception("Rewritten lyrics (Suno prompt) are empty after generation.")
 
-#         try:
-#             voices = self.eleven_client.voices.get_all().voices
-#             voice_list = "\n".join(
-#                 [f"- {v.name}: {getattr(v, 'description', 'No description')}" for v in voices]
-#             )
+        print(f"  ✓ Sample: {rewritten[:100].replace('\n', ' ')}...")
 
-#             prompt = f"""
-#             Based on this voice description:
-#             {voice_description}
-
-#             Choose the best matching ElevenLabs voice from:
-#             {voice_list}
-
-#             Return only the voice name.
-#             """
-
-#             resp = self.gemini_model.generate_content(prompt)
-#             match_name = resp.text.strip().lower()
-
-#             for v in voices:
-#                 if v.name.lower() == match_name:
-#                     print(f"  ✓ Voice selected: {v.name}")
-#                     return v.voice_id
-
-#             print("  ⚠ No exact match found, using default voice.")
-#             return "pNInz6obpgDQGcFmaJgB"
-
-#         except Exception as e:
-#             print(f"  ✗ Voice match error: {e}")
-#             return "pNInz6obpgDQGcFmaJgB"
-
-#     # =============================================================
-#     # SYNTHESIS STAGE
-#     # =============================================================
-
-#     def synthesize_voice(self, lyrics: str, artist_name: str = None) -> str | None:
-#         """
-#         Generate vocals from lyrics using the best ElevenLabs voice.
-#         """
-#         print("\n" + "=" * 60)
-#         print("VOICE SYNTHESIS")
-#         print("=" * 60)
-
-#         if not self.eleven_client:
-#             print("  ✗ ElevenLabs client not initialized — cannot synthesize voice.")
-#             return None
-
-#         # Analyze & pick voice
-#         if artist_name:
-#             description = self.analyze_voice(artist_name)
-#             voice_id = self.pick_best_voice(description)
-#         else:
-#             voice_id = "pNInz6obpgDQGcFmaJgB"  # Default
-#             print("  ⚙ Using default ElevenLabs voice.")
-
-#         # Generate audio
-#         print(f"  🎤 Generating vocals using voice ID: {voice_id}")
-
-#         try:
-#             audio_generator = self.eleven_client.text_to_speech.convert(
-#                 voice_id=voice_id,
-#                 model_id="eleven_multilingual_v2",
-#                 text=lyrics,
-#                 output_format="mp3_44100_128"
-#             )
-
-#             output_dir = Path("output")
-#             output_dir.mkdir(exist_ok=True)
-#             output_path = output_dir / "generated_vocals.mp3"
-
-#             audio_bytes = b"".join(audio_generator)
-#             with open(output_path, "wb") as f:
-#                 f.write(audio_bytes)
-
-#             print(f"  ✓ Vocals successfully saved to {output_path}")
-#             return str(output_path)
-
-#         except Exception as e:
-#             print(f"  ✗ Voice synthesis failed: {e}")
-#             import traceback
-#             traceback.print_exc()
-#             return None
-
-#     # =============================================================
-#     # PIPELINE INTERFACE
-#     # =============================================================
-
-#     def process(self, lyrics_data: dict, artist_name: str = None):
-#         """
-#         Pipeline entrypoint — expects `lyrics_data` from previous stage.
-#         """
-#         lyrics = (
-#             lyrics_data.get("rewritten")
-#             if isinstance(lyrics_data, dict)
-#             else str(lyrics_data)
-#         )
-
-#         return self.synthesize_voice(lyrics, artist_name or "Unknown Artist")
-
-# =====================================================
-# 4️⃣ ALIGNER AGENT (COMMENTED OUT - REPLACED BY SUNO)
-# =====================================================
-# class AlignerAgent:
-#     def process(self, vocals_path, timing_data):
-#         print("\n" + "=" * 60)
-#         print("STAGE 4: ALIGNMENT (Placeholder)")
-#         print("=" * 60)
-#         return vocals_path
+        return {"original": lyrics_data, "rewritten": rewritten, "theme": theme}
 
 
 # =====================================================
-# 5️⃣ MIXER AGENT (COMMENTED OUT - REPLACED BY SUNO)
-# =====================================================
-# class MixerAgent:
-#     def __init__(self):
-#         self.output_dir = Path("output")
-#         self.output_dir.mkdir(exist_ok=True)
-
-#     def process(self, vocals_path, instrumental_path, output_name="final_mix"):
-#         print("\n" + "=" * 60)
-#         print("STAGE 5: MIXING")
-#         print("=" * 60)
-
-#         from pydub import AudioSegment
-
-#         vocals = AudioSegment.from_file(vocals_path)
-#         instrumental = AudioSegment.from_file(instrumental_path)
-
-#         if len(vocals) > len(instrumental):
-#             vocals = vocals[:len(instrumental)]
-#         else:
-#             instrumental = instrumental[:len(vocals)]
-
-#         mixed = instrumental.overlay(vocals)
-#         output_path = self.output_dir / f"{output_name}.wav"
-#         mixed.export(output_path, format="wav")
-#         print(f"  ✓ Final mix saved to: {output_path}")
-#         return str(output_path)
-
-
-# =====================================================
-# ⭐️ NEW VOICE AGENT: SUNO
+# ⭐️ NEW VOICE AGENT: SUNO (FIXED: Uses File Stream Upload with correct URL)
 # =====================================================
 class CreateSongAgent:
     """
     A class to interact with the Suno API, handling file uploads
     and requests to add vocals to an instrumental track.
-
-    This agent replaces VoiceSynth, Aligner, and Mixer.
     """
 
     def __init__(self, api_key=None, base_url="https://api.sunoapi.org"):
-        """
-        Initializes the agent.
-        """
         self.api_key = api_key or os.environ.get("SUNO_API_KEY")
+        # Use the base URL for the 'add-vocals' request (which may or may not be correct)
         self.base_url = base_url
 
         if not self.api_key:
@@ -378,7 +230,8 @@ class CreateSongAgent:
 
     def _upload_local_file(self, local_file_path):
         """
-        (Step 1) Uploads a local audio file to the API's file stream endpoint.
+        (Step 1) Uploads a local audio file using the File Stream Upload method.
+        This uses the URL confirmed in the documentation snippet 1.2.
         """
         if not self.api_key:
             print("❌ Cannot upload file: API key is missing.")
@@ -388,31 +241,37 @@ class CreateSongAgent:
             print(f"❌ File not found at path: {local_file_path}")
             return None
 
-        upload_url = f"{self.base_url}/api/file-stream-upload"
+        # --- CORRECT URL FROM DOCUMENTATION SNIPPET ---
+        upload_url = "https://sunoapiorg.redpandaai.co/api/file-stream-upload"
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
-        # --- New Retry Logic ---
         retries = 3
-        delay = 5  # seconds to wait between retries
+        delay = 5
 
         for attempt in range(retries):
             try:
                 # We open the file in binary-read mode ('rb')
                 with open(local_file_path, 'rb') as f:
-                    files = {'file': (os.path.basename(local_file_path), f)}
+                    # 'files' is the correct way to send multipart/form-data
+                    files = {
+                        'file': (os.path.basename(local_file_path), f),
+                        # Required form data parameters based on the cURL example:
+                        'uploadPath': ('images/user-uploads'),
+                        'fileName': (os.path.basename(local_file_path))
+                    }
 
                     print(f"Uploading {local_file_path} to {upload_url} (Attempt {attempt + 1}/{retries})...")
+                    # Do NOT include Content-Type header when using 'files' parameter, requests handles it.
                     response = requests.post(upload_url, headers=headers, files=files)
 
-                    # This will raise an error if the HTTP response is 4xx or 5xx
-                    response.raise_for_status()
+                    response.raise_for_status()  # Raise an HTTPError for bad responses (4xx or 5xx)
 
                     response_data = response.json()
 
-                    if response_data.get("success") and "data" in response_data and "downloadUrl" in response_data[
-                        "data"]:
+                    # Check for success based on the documented response structure
+                    if response_data.get("success") is True and "downloadUrl" in response_data.get("data", {}):
                         download_url = response_data["data"]["downloadUrl"]
-                        print(f"✅ File uploaded successfully. URL: {download_url}")
+                        print(f"✅ File uploaded successfully. URL received: {download_url[:50]}...")
                         return download_url
                     else:
                         print(f"❌ File upload failed (API logic error). API response: {response_data}")
@@ -420,43 +279,46 @@ class CreateSongAgent:
 
             except requests.exceptions.HTTPError as http_err:
                 print(f"❌ HTTP error occurred during upload: {http_err}")
-                print(f"Response content: {response.content}")
-                if response.status_code in [500, 502, 503, 504]:
-                    # These are server errors. Let's wait and retry.
-                    print(f"Server error ({response.status_code}). Waiting {delay}s to retry...")
+                if attempt < retries - 1:
+                    print(f"Server error. Waiting {delay}s to retry...")
                     time.sleep(delay)
                 else:
-                    # Client error (like 401 Unauthorized), no point retrying.
-                    return None
+                    raise Exception(f"Upload failed after {retries} attempts. Response: {response.content.decode()}")
+
             except requests.exceptions.RequestException as req_err:
-                # Network error (e.g., connection timed out)
                 print(f"❌ A network error occurred during upload: {req_err}")
-                print(f"Waiting {delay}s to retry...")
-                time.sleep(delay)
+                if attempt < retries - 1:
+                    print(f"Waiting {delay}s to retry...")
+                    time.sleep(delay)
+                else:
+                    raise Exception(f"Network failure after {retries} attempts.")
             except Exception as e:
                 print(f"❌ An unexpected error occurred during file upload: {e}")
-                return None  # Don't retry on unknown errors
+                return None
 
-        print(f"❌ File upload failed after {retries} attempts.")
-        return None
+        return None  # Should not be reached if exceptions are raised correctly
 
     def send_request(self, song_description, local_file_path, callback_url=None):
         """
-        (Step 2) Sends a request to add vocals using the uploaded local file.
-        This is the main public method to call.
+        (Step 2) Sends a request to add vocals using the uploaded file's URL.
         """
+        # --- FIX 1: Use the corrected stream upload method ---
         instrumental_url = self._upload_local_file(local_file_path)
+
         if not instrumental_url:
             print("❌ Halting request: File upload failed.")
             return None
 
-        print(f"Sending 'add-vocals' request for {instrumental_url}...")
+        print(f"Sending 'add-vocals' request...")
+        # Endpoint remains the original base_url for the main API call
         url = f"{self.base_url}/api/v1/generate/add-vocals"
+
+        # ... (payload and headers remain the same for the add-vocals call) ...
 
         payload = {
             "prompt": song_description,
             "title": "AI Generated Song",
-            "negativeTags": "Heavy Metal, Aggressive Vocals",
+            "negativeTags": "acoustic, spoken word",
             "style": "Pop",
             "vocalGender": "m",
             "styleWeight": 0.61,
@@ -466,7 +328,6 @@ class CreateSongAgent:
             "model": "V4_5PLUS"
         }
 
-        # Only add the callback URL if one is provided
         if callback_url:
             payload["callBackUrl"] = callback_url
 
@@ -479,39 +340,33 @@ class CreateSongAgent:
         try:
             response = requests.post(url, json=payload, headers=headers)
             response.raise_for_status()
-            print("✅ 'Add-vocals' request successful!")
             response_json = response.json()
-            print("Response JSON:", response_json)
 
-            # This is where you would get the task_id to poll
-            # e.g., print(f"Task ID for polling: {response_json.get('taskId')}")
+            if response_json.get('code') == 200 and 'taskId' in response_json.get("data", {}):
+                print(f"✅ 'Add-vocals' task started. Task ID: {response_json['data']['taskId']}")
+                return response_json
+            else:
+                print(f"❌ 'Add-vocals' API failed: {response_json.get('msg', 'Unknown API error')}")
+                return None
 
-            return response_json
-
-        except requests.exceptions.HTTPError as http_err:
-            print(f"❌ HTTP error occurred on 'add-vocals': {http_err}")
-            print(f"Response content: {response.content}")
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Network error occurred on 'add-vocals': {e}")
         except Exception as e:
             print(f"❌ An unexpected error occurred: {e}")
         return None
 
 
 # =====================================================
-# MAIN PIPELINE (UPDATED TO USE SUNO)
+# MAIN PIPELINE
 # =====================================================
 class SongPipeline:
     def __init__(self, gemini_api_key=None):
         print("Initializing AI Song Pipeline...")
         self.preprocess_agent = PreProcessAgent()
+        # Pass the artist_name when creating the lyric agent
         self.lyric_gen_agent = LyricGenerationAgent(api_key=gemini_api_key)
 
-        # --- New Suno Agent ---
         self.suno_agent = CreateSongAgent()
-
-        # --- Old Agents (Commented Out) ---
-        # self.voice_synth_agent = VoiceSynthAgent(gemini_api_key)
-        # self.aligner_agent = AlignerAgent()
-        # self.mixer_agent = MixerAgent()
         print("Pipeline initialized.")
 
     def run(self, song_path, theme, artist_name="Unknown Artist"):
@@ -520,18 +375,24 @@ class SongPipeline:
         print("=" * 60)
 
         # --- STAGE 1: PRE-PROCESSING ---
-        # Get instrumental path and original lyric data
-        preprocess = self.preprocess_agent.process(song_path)
-        instrumental_path = preprocess["instrumental_path"]
-        lyrics_data = preprocess["lyrics_data"]
+        try:
+            preprocess = self.preprocess_agent.process(song_path)
+            instrumental_path = preprocess["instrumental_path"]
+            lyrics_data = preprocess["lyrics_data"]
+        except Exception as e:
+            print(f"❌ Pipeline failed during Pre-Processing: {e}")
+            return None
 
         # --- STAGE 2: LYRIC GENERATION ---
-        # Get rewritten lyrics to use as the Suno prompt
-        rewritten_data = self.lyric_gen_agent.process(lyrics_data, theme)
-        suno_prompt = rewritten_data["rewritten"]
+        # Pass artist_name to the process method for better new lyric generation
+        try:
+            rewritten_data = self.lyric_gen_agent.process(lyrics_data, theme, artist_name)
+            suno_prompt = rewritten_data["rewritten"]
+        except Exception as e:
+            print(f"❌ Pipeline failed during Lyric Generation: {e}")
+            return None
 
         # --- STAGE 3: SUNO SONG CREATION ---
-        # This one call replaces VoiceSynth, Aligner, and Mixer
         print("\n" + "=" * 60)
         print("STAGE 3: CREATING SONG WITH SUNO")
         print("=" * 60)
@@ -539,19 +400,9 @@ class SongPipeline:
         final_song_data = self.suno_agent.send_request(
             song_description=suno_prompt,
             local_file_path=instrumental_path
-            # We are not passing a callback_url, so we will need to poll
         )
 
-        # --- Old Pipeline (Commented Out) ---
-        # print("... (Old ElevenLabs path disabled) ...")
-        # rewritten = self.lyric_gen_agent.process(lyrics_data, theme)
-        # synth_vocals = self.voice_synth_agent.process(rewritten, artist_name=artist_name)
-        # aligned = self.aligner_agent.process(synth_vocals, lyrics_data)
-        # final = self.mixer_agent.process(preprocess["vocals_path"], preprocess["instrumental_path"], f"{Path(song_path).stem}_remix")
-
         print("\n✓ PIPELINE COMPLETE.")
-        # This will return the JSON response from Suno,
-        # which contains the task ID for polling.
         return final_song_data
 
 
@@ -565,13 +416,17 @@ def main():
     parser.add_argument("--artist", default="Unknown Artist", help="Name of the original artist (for style reference)")
     args = parser.parse_args()
 
-    pipeline = SongPipeline()
+    # Pass the API key from environment to the pipeline, which distributes it
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+
+    pipeline = SongPipeline(gemini_api_key=gemini_api_key)
+    print(f"Starting pipeline for song: '{args.song}' with theme: '{args.theme}'")
     output = pipeline.run(args.song, args.theme, args.artist)
-    print(f"\nFinal Suno Response (contains task ID): {output}")
+
+    # Display the final output for the user
+    output_display = json.dumps(output, indent=2) if output else "None"
+    print(f"\nFinal Suno Response (contains task ID): {output_display}")
 
 
 if __name__ == "__main__":
-    # Note: The other `if __name__ == "__main__":` block under CreateSongAgent
-    # is for testing that class in isolation. This block below is the
-    # main entrypoint for your *entire pipeline*.
     sys.exit(main())
