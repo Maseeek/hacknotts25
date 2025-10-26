@@ -10,6 +10,15 @@ import requests
 from pathlib import Path
 from dotenv import load_dotenv
 import whisper
+import librosa
+import soundfile as sf
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
+import numpy as np
+from pydub import AudioSegment
+import json
+import matplotlib.pyplot as plt
+
 
 # Load environment variables
 load_dotenv()
@@ -470,15 +479,6 @@ class VoiceSynthAgent:
 # =====================================================
 # 4️⃣ ALIGNER AGENT
 # =====================================================
-import librosa
-import soundfile as sf
-from fastdtw import fastdtw
-from scipy.spatial.distance import euclidean
-import numpy as np
-from pydub import AudioSegment
-import json
-import os
-import matplotlib.pyplot as plt
 
 
 class AlignerAgent:
