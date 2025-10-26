@@ -508,6 +508,212 @@ class MixerAgent:
         return str(output_path)
 
 
+import os
+import requests
+
+
+class CreateSongAgent:
+    """
+    A class to interact with the Suno API, handling file uploads
+    and requests to add vocals to an instrumental track.
+    """
+
+    def __init__(self, api_key=None, base_url="https://api.sunoapi.org"):
+        """
+        Initializes the agent.
+
+        Args:
+            api_key (str, optional): The Suno API key. If None, it will
+                                     try to read from the SUNO_API_KEY
+                                     environment variable.
+            base_url (str, optional): The base URL for the Suno API.
+        """
+        self.api_key = api_key or os.environ.get("SUNO_API_KEY")
+        self.base_url = base_url
+
+        if not self.api_key:
+            print("⚠ No SUNO API key found. Set SUNO_API_KEY in your .env file.")
+            # Depending on your design, you might want to raise an error
+            # raise ValueError("SUNO_API_KEY not found.")
+
+    def _upload_local_file(self, local_file_path):
+        """
+        (Step 1) Uploads a local audio file to the API's file stream endpoint.
+
+        This is a private helper method.
+
+        Args:
+            local_file_path (str): The path to the local .mp3 or .wav file.
+
+        Returns:
+            str: A public URL for the uploaded file, or None if it failed.
+        """
+        if not self.api_key:
+            print("❌ Cannot upload file: API key is missing.")
+            return None
+
+        # Check if the file exists before trying to upload
+        if not os.path.exists(local_file_path):
+            print(f"❌ File not found at path: {local_file_path}")
+            return None
+
+        # This is the special endpoint for direct file uploads
+        upload_url = f"{self.base_url}/api/file-stream-upload"
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            # For multipart/form-data, 'requests' library sets the
+            # 'Content-Type' header automatically when using the 'files' param.
+        }
+
+        try:
+            # We open the file in binary-read mode ('rb')
+            with open(local_file_path, 'rb') as f:
+                # The 'files' parameter tells 'requests' to send a multipart/form-data
+                # request. The API documentation suggests the field name is 'file'.
+                files = {
+                    'file': (os.path.basename(local_file_path), f)
+                }
+
+                print(f"Uploading {local_file_path} to {upload_url}...")
+                response = requests.post(upload_url, headers=headers, files=files)
+
+                # This will raise an error if the HTTP response is 4xx or 5xx
+                response.raise_for_status()
+
+                response_data = response.json()
+
+                # We check the response structure based on the documentation
+                # for a successful upload.
+                if response_data.get("success") and "data" in response_data and "downloadUrl" in response_data["data"]:
+                    download_url = response_data["data"]["downloadUrl"]
+                    print(f"✅ File uploaded successfully. URL: {download_url}")
+                    return download_url
+                else:
+                    print(f"❌ File upload failed. API response: {response_data}")
+                    return None
+
+        except requests.exceptions.HTTPError as http_err:
+            print(f"❌ HTTP error occurred during upload: {http_err}")
+            print(f"Response content: {response.content}")
+        except requests.exceptions.RequestException as req_err:
+            print(f"❌ A network error occurred during upload: {req_err}")
+        except Exception as e:
+            print(f"❌ An unexpected error occurred during file upload: {e}")
+
+        return None
+
+    def send_request(self, song_description, local_file_path):
+        """
+        (Step 2) Sends a request to add vocals using the uploaded local file.
+
+        This is the main public method to call.
+
+        Args:
+            song_description (str): A description of the song/vocals to generate.
+            local_file_path (str): The *local file path* to the instrumental MP3.
+
+        Returns:
+            dict: The JSON response from the API, or None if it failed.
+        """
+
+        # --- STEP 1: UPLOAD THE FILE ---
+        # Call our helper method to get the public URL
+        instrumental_url = self._upload_local_file(local_file_path)
+
+        # If the upload failed, stop here.
+        if not instrumental_url:
+            print("❌ Halting request: File upload failed.")
+            return None
+
+        # --- STEP 2: SEND THE 'ADD VOCALS' REQUEST ---
+        print(f"Sending 'add-vocals' request for {instrumental_url}...")
+
+        url = f"{self.base_url}/api/v1/generate/add-vocals"
+
+        # This is the payload for the 'add-vocals' endpoint
+        payload = {
+            "prompt": song_description,
+            "title": "Relaxing Piano with Vocals",
+            "negativeTags": "Heavy Metal, Aggressive Vocals",
+            "style": "Jazz",
+            "vocalGender": "m",
+            "styleWeight": 0.61,
+            "weirdnessConstraint": 0.72,
+            "audioWeight": 0.65,
+            "uploadUrl": instrumental_url,  # <-- We use the URL from Step 1!
+            "callBackUrl": "https://api.example.com/callback",
+            "model": "V4_5PLUS"
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
+        try:
+            # Make the final POST request with the JSON payload
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()  # Check for HTTP errors
+
+            print("✅ 'Add-vocals' request successful!")
+            response_json = response.json()
+            print("Response JSON:", response_json)
+            return response_json
+
+        except requests.exceptions.HTTPError as http_err:
+            print(f"❌ HTTP error occurred on 'add-vocals': {http_err}")
+            print(f"Response content: {response.content}")
+        except requests.exceptions.RequestException as req_err:
+            print(f"❌ A network error occurred on 'add-vocals': {req_err}")
+        except Exception as e:
+            print(f"❌ An unexpected error occurred: {e}")
+
+        return None
+
+
+# --- Example Usage ---
+if __name__ == "__main__":
+    # This block runs only when you execute this script directly
+
+    # Optional: If you use a .env file to store your API key,
+    # you need to install and use python-dotenv
+    # pip install python-dotenv
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        print("Loaded .env file.")
+    except ImportError:
+        print(".env file not loaded. Make sure 'python-dotenv' is installed if you use it.")
+
+    # 1. Create an instance of the agent
+    #    It will automatically try to find the 'SUNO_API_KEY'
+    #    from your environment variables.
+    agent = CreateSongAgent()
+
+    # 2. Check if the agent found the API key before proceeding
+    if agent.api_key:
+
+        # 3. Define the path to your *local* instrumental file
+        #    *** IMPORTANT: REPLACE THIS WITH YOUR ACTUAL FILE PATH ***
+        my_local_mp3 = r"C:\Users\masee\Downloads\my beat i made.mp3"
+        # e.g., "C:/Users/MyUser/Music/instrumental.mp3" (Windows)
+        # e.g., "/Users/MyUser/Music/instrumental.mp3" (Mac/Linux)
+        # e.g., "./instrumental.mp3" (if it's in the same folder)
+
+        # 4. Define the prompt for the vocals
+        song_prompt = "A slow, soulful vo cal melody about walking in the rain."
+
+        # 5. Call the method!
+        agent.send_request(
+            song_description=song_prompt,
+            local_file_path=my_local_mp3
+        )
+    else:
+        print("Please set the SUNO_API_KEY environment variable to run the example.")
+
 # =====================================================
 # MAIN PIPELINE
 # =====================================================
